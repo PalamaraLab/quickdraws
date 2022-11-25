@@ -11,9 +11,11 @@ python src/convert_to_hdf5.py \
     --output output/qd \
     --bed ${bed} \
     --pheno ${pheno} \
-    --covar ${covar}
+    --covar ${covar} \
+    --bgen ${bgen} \
+    --sample ${sample}
 
-## step 1: run model fitting (step 1) on genotypes and phenotypes
+# step 1: run model fitting (step 1) on genotypes and phenotypes
 python src/quickdraws_step1.py \
     --output output/qd \
     --bed ${bed} \

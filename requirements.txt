@@ -10,3 +10,4 @@ torch==1.13.0
 tqdm==4.64.0
 wandb==0.13.5
 tables==3.7.0
+bitsandbytes==0.35.4

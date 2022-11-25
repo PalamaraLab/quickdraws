@@ -6,6 +6,7 @@ import numpy as np
 import numpy.ma as ma
 from tqdm import tqdm
 import argparse
+from pysnptools.distreader import Bgen
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 
@@ -104,6 +105,12 @@ def convert_to_hdf5(
     return out + ".hdf5"
 
 
+def load_bgen_tempfiles(args):
+    snp_on_disk = Bgen(args.bgen, sample=args.sample)
+    snp_on_disk = snp_on_disk.as_snp(max_weight=2)
+    snp_on_disk.shape
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--bed", "-g", help="prefix for bed/bim/fam files", type=str)
@@ -128,6 +135,9 @@ if __name__ == "__main__":
         help='file with sample id to remove; should be in "FID,IID" format and tsv',
         type=str,
     )
+    parser.add_argument("--bgen", help="Location to Bgen file", type=str)
+    parser.add_argument("--sample", help="Location to samples file", type=str)
+
     args = parser.parse_args()
 
     adj_pheno_file = ".".join([args.output, "adjusted_traits", "phen"])
@@ -137,3 +147,4 @@ if __name__ == "__main__":
     PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
 
     filename = convert_to_hdf5(args.bed, adj_pheno_file, sample_indices, args.output)
+    load_bgen_tempfiles(args)

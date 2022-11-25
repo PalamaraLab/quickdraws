@@ -8,6 +8,7 @@ from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 from runRHE import runRHE, MakeAnnotation, runSCORE
 from convert_to_hdf5 import convert_to_hdf5
 from blr import blr_spike_slab, str_to_bool
+from cavi import cavi_on_svi
 
 ## main script for the method
 # dependency: pysnptools, pytorch, argparse, Path, wandb, qmplot, plink2 and RHE-MCMT
@@ -76,10 +77,10 @@ parser.add_argument(
     type=str,
 )
 parser.add_argument(
-    "--multi_trait",
-    type=str_to_bool,
-    help="Runs multi-trait analysis, capturing genetic corr. between traits",
-    default="false",
+    "--cavi_on_top",
+    type=int,
+    help="Runs a few cavi steps on top for better results",
+    default=5,
 )
 parser.add_argument(
     "--rhemc",
@@ -227,12 +228,10 @@ else:
 ######      Running variational inference     ######
 st = time.time()
 print("Running VI using spike and slab prior..")
-if args.multi_trait is False:
-    print("Using BLR for whole genome regression..")
-    residuals_file = blr_spike_slab(args, VC, hdf5_filename)
-else:
-    print("Using BNN for whole genome regression..")
-    residuals_file = bnn_spike_slab(args, VC, hdf5_filename)
+blr_spike_slab(args, VC, hdf5_filename)
+if args.cavi_on_top > 0:
+    print("Running a few CAVI steps on top..")
+    cavi_on_svi(args, hdf5_filename)
 
 print("Done in " + str(time.time() - st) + " secs")
 

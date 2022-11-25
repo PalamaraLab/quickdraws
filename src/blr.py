@@ -21,6 +21,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from joblib import Parallel, delayed
 
+import bitsandbytes as bnb
+
 
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
@@ -273,7 +275,7 @@ class Trainer:
         model_list,
         lr,
         device,
-        adam_eps=1e-8,
+        adam_eps=1e-4,
         weight_decay=0,
         validate_every=1,
         chr_map=None,
@@ -311,13 +313,15 @@ class Trainer:
         self.optimizer_list = []
         for model_no, model in enumerate(model_list):
             self.optimizer_list.append(
-                torch.optim.Adam(
+                bnb.optim.Adam(
                     model.parameters(),
                     lr=lr[model_no // self.num_chr]
                     if len(lr) != len(model_list)
                     else lr[model_no],
                     eps=adam_eps,
                     weight_decay=weight_decay,
+                    betas=(0.9, 0.995),
+                    optim_bits=8,
                 )
             )
         if self.args.cosine_scheduler:
@@ -495,6 +499,37 @@ class Trainer:
                     out + "loco_chr" + str(int(chr)) + ".residuals", sep="\t"
                 )
 
+    def save_variational_parameters(self, best_alpha, out):
+        ## Saves the mu and spike varational paramters
+        mu = []
+        psi = []
+
+        for chr_no, c in enumerate(torch.unique(self.chr_map)):
+            mu.append(np.zeros((len(self.h2), int(torch.sum(self.chr_map != c)))))
+            psi.append(np.zeros((len(self.h2), int(torch.sum(self.chr_map != c)))))
+
+        with torch.no_grad():
+            for model_no, model in enumerate(self.model_list):
+                chr_no = model_no % self.num_chr
+                phen_no = self.pheno_for_model[model_no // self.num_chr]
+                mu[chr_no][phen_no] = model.fc1.weight.detach().cpu().numpy()
+                psi[chr_no][phen_no] = (
+                    1
+                    - torch.clamp(model.sc1.spike1, 1e-6, 1.0 - 1e-6)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                )
+
+            for chr_no, chr in enumerate(torch.unique(self.chr_map)):
+                pd.DataFrame(np.array(mu[chr_no])).to_csv(
+                    out + "loco_chr" + str(int(chr)) + ".mu", sep="\t"
+                )
+                pd.DataFrame(np.array(psi[chr_no])).to_csv(
+                    out + "loco_chr" + str(int(chr)) + ".psi", sep="\t"
+                )
+            np.savetxt(out + ".alpha", self.alpha[best_alpha])
+
     def save_exact_blup_residuals(self, best_alpha, out):
         ## Saves the exact LOCO residuals for the entire dataset in a text file
         ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
@@ -513,9 +548,6 @@ class Trainer:
                     preds = (input[:, self.chr_map != self.unique_chr_map[chr_no]]) @ (
                         beta.T
                     )
-                    # label[:, phen_no][torch.isnan(label[:, phen_no])] = preds[
-                    #     torch.isnan(label[:, phen_no])
-                    # ]
                     loco_residuals[chr_no][prev : prev + len(input)][:, phen_no] = (
                         (label[:, phen_no] - preds).detach().cpu().numpy()
                     )
@@ -548,9 +580,9 @@ class Trainer:
                 )  ## adding extra 2 or 4 cause of antithetic variates
                 loss = mse_loss + reg_loss
                 ## store the mse loss and reg loss
-                mse_loss_arr.append(mse_loss)
-                reg_loss_arr.append(reg_loss)
-                total_loss_arr.append(loss)
+                mse_loss_arr.append(mse_loss.item())
+                reg_loss_arr.append(reg_loss.item())
+                total_loss_arr.append(loss.item())
                 ## Backprop ##
                 self.optimizer_list[model_no].zero_grad()
                 loss.backward()
@@ -575,13 +607,13 @@ class Trainer:
                     with torch.no_grad():
                         log_dict["train_mse_loss_" + str(alpha)] = mse_loss_arr[
                             model_no
-                        ].item() / len(label)
+                        ] / len(label)
                         log_dict["train_kl_loss_" + str(alpha)] = reg_loss_arr[
                             model_no
-                        ].item() / len(label)
+                        ] / len(label)
                         log_dict["train_total_loss_" + str(alpha)] = total_loss_arr[
                             model_no
-                        ].item() / len(label)
+                        ] / len(label)
                         log_dict["mean_sigma_" + str(alpha)] = torch.mean(
                             F.relu(self.model_list[model_no].sc1.sigma1)
                         ).cpu()
@@ -632,29 +664,10 @@ class Trainer:
                 )
                 loss = 0.5 * mse_loss + reg_loss
 
-                ## log losses
-                mse_loss_total += mse_loss.item()
-                reg_loss_total += reg_loss.item()
-                total_loss_total += loss.item()
-
                 ## Backprop ##
                 self.optimizer_list[model_no].zero_grad()
                 loss.backward()
                 self.optimizer_list[model_no].step()
-
-            if not self.never_validate and (self.wandb_step % 50 == 0):
-                with torch.no_grad():
-                    log_dict["train_mse_loss"] = (
-                        mse_loss_total / len(self.model_list) / len(label)
-                    )
-                    log_dict["train_kl_loss"] = (
-                        reg_loss_total / len(self.model_list) / len(label)
-                    )
-                    log_dict["train_total_loss"] = (
-                        total_loss_total / len(self.model_list) / len(label)
-                    )
-                wandb.log(log_dict, step=self.wandb_step)
-            self.wandb_step += 1
 
         if hasattr(self, "scheduler_list"):
             for scheduler in self.scheduler_list:
@@ -758,7 +771,7 @@ def initialize_model(
     return model_list
 
 
-def hyperparam_search(args, alpha, h2, hdf5_filename):
+def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     # Define datasets and dataloaders
     print("Loading the data to RAM..")
     start_time = time.time()
@@ -781,8 +794,6 @@ def hyperparam_search(args, alpha, h2, hdf5_filename):
         train_split=args.train_split,
     )
     print("Done loading in: " + str(time.time() - start_time) + " secs")
-    # get freer GPU among all possible options
-    device = "cuda"
     # Define model and enable wandb live policy
     std_genotype = torch.as_tensor(train_dataset.std_genotype).float()
     std_y = torch.std(train_dataset.output, axis=0).float()
@@ -849,10 +860,10 @@ def hyperparam_search(args, alpha, h2, hdf5_filename):
     del test_dataset.hap1
     del test_dataset.hap2
     del model_list
-    return output_loss, device, mu_list, spike_list
+    return output_loss, mu_list, spike_list
 
 
-def blr_spike_slab(args, h2, hdf5_filename):
+def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     overall_start_time = time.time()
     if not args.wandb_mode == "disabled":
         print("Initializing wandb to log the progress..")
@@ -870,11 +881,14 @@ def blr_spike_slab(args, h2, hdf5_filename):
 
     ## hard-coding alpha values as in BOLT
     alpha = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
-    output_loss, device, mu, spike = hyperparam_search(args, alpha, h2, hdf5_filename)
+    output_loss, mu, spike = hyperparam_search(
+        args, alpha, h2, hdf5_filename, device=device
+    )
     ### 🌵
     # device = "cuda"
     # output_loss = np.zeros((len(h2), len(alpha)))
-    torch.cuda.empty_cache()
+    with torch.no_grad():
+        torch.cuda.empty_cache()
 
     ## Only run for best alpha's
     alpha = np.array(alpha)[np.unique(np.argmin(output_loss, axis=1))]
@@ -962,6 +976,9 @@ def blr_spike_slab(args, h2, hdf5_filename):
     else:
         print("Saving exact LOCO residuals..")
         start_time = time.time()
+        trainer.save_variational_parameters(
+            np.argmin(output_loss_subset, axis=1), args.output
+        )
         trainer.save_exact_blup_residuals(
             np.argmin(output_loss_subset, axis=1), args.output
         )
@@ -979,7 +996,6 @@ def blr_spike_slab(args, h2, hdf5_filename):
     print("Done saving the model in: " + str(time.time() - start_time) + " secs")
     wandb.finish()
     print("Total time elapsed: " + str(time.time() - overall_start_time) + " secs")
-    return args.output + "loco_chr"
 
 
 if __name__ == "__main__":
