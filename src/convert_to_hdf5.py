@@ -113,15 +113,21 @@ def load_bgen_tempfiles(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--bed", "-g", help="prefix for bed/bim/fam files", type=str)
     parser.add_argument(
-        "--output", "-o", help="prefix for where to save any results or files"
+        "--bed", "-g", help="prefix for bed/bim/fam files", type=str, default=None
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="prefix for where to save any results or files",
+        default=None,
     )
     parser.add_argument(
         "--pheno",
         "-p",
         help='phenotype file; should be in "FID,IID,Trait" format and tsv',
         type=str,
+        default=None,
     )
     parser.add_argument(
         "--covar",
@@ -135,16 +141,22 @@ if __name__ == "__main__":
         help='file with sample id to remove; should be in "FID,IID" format and tsv',
         type=str,
     )
-    parser.add_argument("--bgen", help="Location to Bgen file", type=str)
-    parser.add_argument("--sample", help="Location to samples file", type=str)
+    parser.add_argument("--bgen", help="Location to Bgen file", type=str, default=None)
+    parser.add_argument(
+        "--sample", help="Location to samples file", type=str, default=None
+    )
 
     args = parser.parse_args()
 
-    adj_pheno_file = ".".join([args.output, "adjusted_traits", "phen"])
-    Traits, sample_indices = preprocess_phenotypes(
-        args.pheno, args.covar, args.bed, args.removeFile
-    )
-    PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
+    if args.bed is not None and args.pheno is not None:
+        adj_pheno_file = ".".join([args.output, "adjusted_traits", "phen"])
+        Traits, sample_indices = preprocess_phenotypes(
+            args.pheno, args.covar, args.bed, args.removeFile
+        )
+        PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
 
-    filename = convert_to_hdf5(args.bed, adj_pheno_file, sample_indices, args.output)
-    load_bgen_tempfiles(args)
+        filename = convert_to_hdf5(
+            args.bed, adj_pheno_file, sample_indices, args.output
+        )
+    if args.bgen is not None and args.sample is not None:
+        load_bgen_tempfiles(args)
