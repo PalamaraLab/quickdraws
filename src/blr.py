@@ -669,6 +669,14 @@ class Trainer:
                 loss.backward()
                 self.optimizer_list[model_no].step()
 
+                del loss
+                del input_loco_chr
+                del preds
+                del mse_loss
+                del reg_loss
+                model.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+
         if hasattr(self, "scheduler_list"):
             for scheduler in self.scheduler_list:
                 scheduler.step(epoch=epoch)
@@ -844,7 +852,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     print("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
     print("Best MSE across all alpha values: " + str(np.max(output_loss, axis=1)))
 
-    best_alpha = np.argmin(output_loss, axis=1)
+    best_alpha = np.argmax(output_r2, axis=1)
     mu_list = torch.zeros((dim_out, len(std_genotype)))
     spike_list = torch.zeros((dim_out, len(std_genotype)))
     for prs_no in range(dim_out):
@@ -860,7 +868,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     del test_dataset.hap1
     del test_dataset.hap2
     del model_list
-    return output_loss, mu_list, spike_list
+    return output_r2, mu_list, spike_list
 
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
@@ -881,7 +889,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## hard-coding alpha values as in BOLT
     alpha = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
-    output_loss, mu, spike = hyperparam_search(
+    output_r2, mu, spike = hyperparam_search(
         args, alpha, h2, hdf5_filename, device=device
     )
     ### 🌵
@@ -891,11 +899,11 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         torch.cuda.empty_cache()
 
     ## Only run for best alpha's
-    alpha = np.array(alpha)[np.unique(np.argmin(output_loss, axis=1))]
-    output_loss_subset = output_loss[:, np.unique(np.argmin(output_loss, axis=1))]
+    alpha = np.array(alpha)[np.unique(np.argmax(output_r2, axis=1))]
+    output_r2_subset = output_r2[:, np.unique(np.argmax(output_r2, axis=1))]
     pheno_for_model = []
     for j in range(len(alpha)):
-        pheno_for_model.append(np.argmin(output_loss_subset, axis=1) == j)
+        pheno_for_model.append(np.argmax(output_r2_subset, axis=1) == j)
     ## output_loss_subset.shape = number of phenotypes x len(best_alpha)
     print("Training on entire data with best alphas: " + str(alpha))
 
@@ -919,7 +927,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         std_genotype,
         std_y,
         h2,
-        np.argmin(output_loss_subset, axis=1),
+        np.argmax(output_r2_subset, axis=1),
         torch.sum(~(torch.isnan(full_dataset.output).all(axis=1))),
         device,
         args.loco,
@@ -958,7 +966,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     if args.loco == "approx":
         print("Writing BLUP estimates..")
         start_time = time.time()
-        trainer.save_blup_estimates(np.argmin(output_loss_subset, axis=1), args.output)
+        trainer.save_blup_estimates(np.argmax(output_r2_subset, axis=1), args.output)
         print(
             "Done writing BLUP estimates in: " + str(time.time() - start_time) + " secs"
         )
@@ -966,7 +974,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         print("Saving approximate LOCO residuals..")
         start_time = time.time()
         trainer.save_approx_blup_residuals(
-            np.argmin(output_loss_subset, axis=1), args.output
+            np.argmax(output_r2_subset, axis=1), args.output
         )
         print(
             "Done writing approximate LOCO estimates in: "
@@ -977,10 +985,10 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         print("Saving exact LOCO residuals..")
         start_time = time.time()
         trainer.save_variational_parameters(
-            np.argmin(output_loss_subset, axis=1), args.output
+            np.argmax(output_r2_subset, axis=1), args.output
         )
         trainer.save_exact_blup_residuals(
-            np.argmin(output_loss_subset, axis=1), args.output
+            np.argmax(output_r2_subset, axis=1), args.output
         )
         print(
             "Done writing exact LOCO estimates in: "
@@ -1080,7 +1088,7 @@ if __name__ == "__main__":
         help="select the loco scheme",
         type=str,
         choices=["approx", "exact"],
-        default="approx",
+        default="exact",
     )
     ## path arguments
     parser.add_argument(

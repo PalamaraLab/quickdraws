@@ -145,6 +145,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--sample", help="Location to samples file", type=str, default=None
     )
+    parser.add_argument(
+        "--modelSnps",
+        help="Path to list of SNPs to be considered in BLR",
+        default=None,
+        type=str,
+    )
 
     args = parser.parse_args()
 
@@ -156,7 +162,7 @@ if __name__ == "__main__":
         PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
 
         filename = convert_to_hdf5(
-            args.bed, adj_pheno_file, sample_indices, args.output
+            args.bed, adj_pheno_file, sample_indices, args.output, args.modelSnps
         )
     if args.bgen is not None and args.sample is not None:
         load_bgen_tempfiles(args)

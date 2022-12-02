@@ -80,7 +80,7 @@ parser.add_argument(
     "--cavi_on_top",
     type=int,
     help="Runs a few cavi steps on top for better results",
-    default=5,
+    default=0,
 )
 parser.add_argument(
     "--rhemc",
