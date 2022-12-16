@@ -146,7 +146,6 @@ class Model(nn.Module):
         alpha,
         prior_sig,
         posterior_sig=None,
-        mu_var=None,
         mu=None,
         spike=None,
     ):
@@ -162,11 +161,6 @@ class Model(nn.Module):
         if posterior_sig is not None:
             print("Setting posterior sigma to CAVI derived sigmas")
             self.sc1.sigma1 = nn.Parameter(posterior_sig, requires_grad=False)
-        if mu_var is not None:
-            print("Initializing posterior means based on variance of means from CAVI")
-            self.fc1.weight.data = mu_var.to(self.fc1.weight.device) * (
-                torch.randn(self.fc1.weight.shape).to(self.fc1.weight.device)
-            )
         if mu is not None:
             print("Initializing posterior means through transfer learning")
             self.fc1.weight.data = mu.to(self.fc1.weight.device)
@@ -711,9 +705,6 @@ def initialize_model(
             posterior_sig = torch.outer(
                 std_y / (torch.sqrt(1 / (1 - h2) + alpha / h2)), posterior_sig
             )
-
-            mu_var = math.sqrt(1 / len(std_genotype)) / std_genotype
-            mu_var = torch.outer(std_y / (1 + (1 - h2) * alpha / h2), mu_var)
         elif h2.ndim == 2:
             ## h2.shape = #phenotypes x #SNPs
             prior_sig = math.sqrt(1 / alpha) / std_genotype
@@ -730,14 +721,7 @@ def initialize_model(
                 )
             ) * posterior_sig
 
-            mu_var = math.sqrt(num_snps) / std_genotype
-            mu_var = (
-                std_y
-                / (num_snps + (1 - torch.sum(h2, axis=1, keepdim=True)) * alpha / h2)
-            ) * mu_var
-
         assert posterior_sig.shape == prior_sig.shape
-        assert mu_var.shape == posterior_sig.shape
         if loco == "exact":
             assert len(dim_out)
             for chr_no, chr in enumerate(torch.unique(chr_map)):
@@ -752,7 +736,6 @@ def initialize_model(
                     posterior_sig=posterior_sig[dim_out == alpha_no][
                         :, chr_map != chr
                     ].to(device),
-                    mu_var=mu_var[dim_out == alpha_no][:, chr_map != chr].to(device),
                     mu=mu[dim_out == alpha_no][:, chr_map != chr].to(device)
                     if mu is not None
                     else None,
@@ -770,7 +753,6 @@ def initialize_model(
                 alpha=alpha,
                 prior_sig=prior_sig.to(device),
                 posterior_sig=posterior_sig.to(device),
-                mu_var=mu_var.to(device),
                 mu=mu,
                 spike=spike,
             )
