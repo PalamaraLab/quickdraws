@@ -236,7 +236,6 @@ def get_unadjusted_test_statistics_bgen(
             for i in range(snp_on_disk.shape[0])
         ]
     )
-    chr_map = np.array(snp_on_disk.pos[:, 0], dtype="int")  ## chr_no
 
     ## --extract flag
     if snps_to_keep_filename is None:
@@ -257,6 +256,7 @@ def get_unadjusted_test_statistics_bgen(
             except:
                 pass
 
+    del snp_dict
     ### Caution!! only removed temporarily
     # check_residuals_same_order(residualFileList)
 
@@ -270,6 +270,8 @@ def get_unadjusted_test_statistics_bgen(
         sample_indices.append(samples_dict[int(fid)])
     iid_fid_in_bgen = fid_iid[sample_indices]
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
+    chr_map = np.array(snp_on_disk.pos[:, 0], dtype="int")  ## chr_no
+    del samples_dict
 
     ## read covars and preprocess them
     covars = preprocess_covars(covarFile, iid_fid_in_bgen)
@@ -278,9 +280,9 @@ def get_unadjusted_test_statistics_bgen(
     ## calculate batch_size based on max_memory
     ## extra divide by 3 because bgen files give a distrution data as output (aa, Aa, AA)
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0] / 3)
-    beta_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)))
-    chisq_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)))
-    afreq_arr = np.zeros(len(chr_map))
+    beta_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)), dtype="float32")
+    chisq_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)), dtype="float32")
+    afreq_arr = np.zeros(len(chr_map), dtype="float32")
 
     print("Running linear regression to get association")
 
