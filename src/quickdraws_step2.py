@@ -133,7 +133,7 @@ def get_test_statistics(
     n_workers=-1,
 ):
     if n_workers == -1:
-        n_workers = min(8, os.cpu_count() - 1)
+        n_workers = os.cpu_count() - 1
 
     snp_on_disk = Bed(bedfile, count_A1=True)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
@@ -215,7 +215,7 @@ def get_test_statistics_bgen(
     n_workers=-1,
 ):
     if n_workers == -1:
-        n_workers = min(8, os.cpu_count() - 1)
+        n_workers = os.cpu_count() - 1
     if calibrationFile is not None:
         calibration_factors = np.loadtxt(calibrationFile)
         print(calibration_factors)
