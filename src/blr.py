@@ -213,8 +213,7 @@ class HDF5Dataset:
                 np.array(h5py_file[phen_col][train_samples:], dtype=float)
             ).float()
         else:
-            self.hap1 = np.array(h5py_file["hap1"][:])
-            self.hap2 = np.array(h5py_file["hap2"][:])
+            self.hap1, self.hap2 = h5py_file["hap1"][:], h5py_file["hap2"][:]
             self.output = torch.as_tensor(
                 np.array(h5py_file[phen_col][:], dtype=float)
             ).float()
