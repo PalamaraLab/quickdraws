@@ -22,6 +22,7 @@ import torch.nn.functional as F
 from joblib import Parallel, delayed
 
 import bitsandbytes as bnb
+import gc
 
 
 def str_to_bool(s: str) -> bool:
@@ -850,6 +851,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     del test_dataset.hap1
     del test_dataset.hap2
     del model_list
+    gc.collect()
     return output_r2, mu_list, spike_list
 
 
