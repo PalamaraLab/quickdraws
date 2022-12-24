@@ -25,6 +25,15 @@ def adj_r2_(dotprod, n):
     return r2 - (1 - r2) / (n - 2)
 
 
+def adj_standardize_(x):
+    x = np.where(
+        np.isnan(x),
+        np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
+        x,
+    )
+    return (x - np.mean(x, axis=0)) / np.std(x, axis=0)
+
+
 def calc_ldscore_chip(bed, mask_dodgy_snp, unrel_sample_list=None, num_samples=400):
     """
     Calculates the LD scores on the masked SNPs
@@ -42,38 +51,22 @@ def calc_ldscore_chip(bed, mask_dodgy_snp, unrel_sample_list=None, num_samples=4
     assert len(mask_dodgy_snp) == len(pos)
 
     if unrel_sample_list is not None:
-        geno = 2 - (
-            snp_data[
-                random.sample(unrel_sample_list, num_samples),
-                np.argsort(pos),
-            ]
-            .read(dtype="float32")
-            .val
-        )
+        geno = snp_data[
+            random.sample(unrel_sample_list, num_samples),
+            np.argsort(pos),
+        ]
+
     else:
-        geno = 2 - (
-            snp_data[
-                random.sample(range(len(snp_data.iid)), num_samples), np.argsort(pos)
-            ]
-            .read(dtype="float32")
-            .val
-        )
-    geno = np.where(
-        np.isnan(geno),
-        np.nanpercentile(geno, 50, axis=0, interpolation="nearest"),
-        geno,
-    )
-    ## normalize the genotype
-    geno -= np.mean(geno, axis=0)
-    geno /= np.std(geno, axis=0)
-    geno = np.nan_to_num(geno, nan=0)
+        geno = snp_data[
+            random.sample(range(len(snp_data.iid)), num_samples), np.argsort(pos)
+        ]
+
     sid = snp_data.sid
-    geno = geno.T
 
     ## calculate unadjusted r2 among variants, then adjust it
-    ld_score_chip = np.zeros(geno.shape[0])
+    ld_score_chip = np.zeros(len(sid))
     for chr in tqdm(np.unique(chr_map)):
-        nearby_snps_in_chr = np.arange(geno.shape[0])[chr_map == chr]
+        nearby_snps_in_chr = np.arange(len(sid))[chr_map == chr]
         pos_chr = pos[chr_map == chr]
         mask_dodgy_chr = mask_dodgy_snp[chr_map == chr]
         for m1 in nearby_snps_in_chr:
@@ -85,7 +78,14 @@ def calc_ldscore_chip(bed, mask_dodgy_snp, unrel_sample_list=None, num_samples=4
                 ]
                 if len(nearby_snps) > 0:
                     r2_arr = adj_r2_(
-                        np.sum(geno[m1] * geno[nearby_snps], axis=1) / num_samples,
+                        np.sum(
+                            adj_standardize_(geno[:, m1].read(dtype="float32").val)
+                            * adj_standardize_(
+                                geno[:, nearby_snps].read(dtype="float32").val
+                            ),
+                            axis=1,
+                        )
+                        / num_samples,
                         num_samples,
                     )
                     for m2, r2 in zip(nearby_snps, r2_arr):
