@@ -161,7 +161,7 @@ class Model(nn.Module):
         )
         if posterior_sig is not None:
             print("Setting posterior sigma to CAVI derived sigmas")
-            self.sc1.sigma1 = nn.Parameter(posterior_sig, requires_grad=False)
+            self.sc1.sigma1 = nn.Parameter(posterior_sig, requires_grad=True)
         if mu is not None:
             print("Initializing posterior means through transfer learning")
             self.fc1.weight.data = mu.to(self.fc1.weight.device)
@@ -849,8 +849,14 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     del train_dataset.hap2
     del test_dataset.hap1
     del test_dataset.hap2
+    for i in range(len(model_list)):
+        del model_list[0]
     del model_list
+    with torch.no_grad():
+        torch.cuda.empty_cache()
     gc.collect()
+    with torch.no_grad():
+        torch.cuda.empty_cache()
     return output_r2, mu_list, spike_list
 
 
@@ -877,7 +883,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     )
     ### 🌵
     # device = "cuda"
-    # output_loss = np.zeros((len(h2), len(alpha)))
+    # output_r2, mu, spike = np.zeros((len(h2), len(alpha))), None, None
     with torch.no_grad():
         torch.cuda.empty_cache()
 
@@ -900,11 +906,12 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         train_split=args.train_split,
     )
     print("Done loading in: " + str(time.time() - start_time) + " secs")
-    std_genotype = torch.as_tensor(full_dataset.std_genotype).float().to(device)
-    std_y = torch.std(full_dataset.output, axis=0).float().to(device)
-    h2 = torch.as_tensor(h2).float().to(device)
+    std_genotype = torch.as_tensor(
+        full_dataset.std_genotype, dtype=torch.float32
+    )  # .to(device)
+    std_y = torch.std(full_dataset.output, axis=0)  # .to(device)
+    h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
     chr_map = full_dataset.chr.to(device)
-
     model_list = initialize_model(
         alpha,
         std_genotype,
@@ -915,10 +922,15 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         device,
         args.loco,
         chr_map,
-        mu=mu.to(device),
-        spike=spike.to(device),
+        mu=mu,
+        spike=spike,
     )
-    torch.cuda.empty_cache()
+    print(torch.cuda.memory_allocated())
+    del mu
+    del spike
+    gc.collect()
+    with torch.no_grad():
+        torch.cuda.empty_cache()
 
     print("Calculating Residuals using entire dataset..")
     start_time = time.time()
