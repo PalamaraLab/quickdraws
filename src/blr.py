@@ -911,7 +911,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     )  # .to(device)
     std_y = torch.std(full_dataset.output, axis=0)  # .to(device)
     h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
-    chr_map = full_dataset.chr.to(device)
+    chr_map = full_dataset.chr  # .to(device)
     model_list = initialize_model(
         alpha,
         std_genotype,
@@ -944,7 +944,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         lr=args.lr,
         device=device,
         validate_every=1,
-        chr_map=chr_map,
+        chr_map=chr_map.to(device),
         pheno_for_model=pheno_for_model,
     )
     if args.loco == "approx":
