@@ -669,7 +669,7 @@ class Trainer:
                 del mse_loss
                 del reg_loss
                 model.zero_grad(set_to_none=True)
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
 
         if hasattr(self, "scheduler_list"):
             for scheduler in self.scheduler_list:

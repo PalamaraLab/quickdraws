@@ -256,7 +256,7 @@ def get_unadjusted_test_statistics_bgen(
             except:
                 pass
 
-    del snp_dict
+        del snp_dict
     ### Caution!! only removed temporarily
     # check_residuals_same_order(residualFileList)
 
