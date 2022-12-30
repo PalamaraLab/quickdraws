@@ -192,7 +192,7 @@ def get_test_statistics(
         partial_calibrate_test_stats = partial(
             calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out
         )
-        correction = Parallel(n_jobs=min(16, n_workers))(
+        correction = Parallel(n_jobs=min(8, n_workers))(
             delayed(partial_calibrate_test_stats)(i) for i in pheno_list
         )
         np.savetxt(out + ".calibration", correction)
