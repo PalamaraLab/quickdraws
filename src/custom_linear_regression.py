@@ -119,7 +119,7 @@ def MyLinRegr(X, Y, W):
         var_y = Y[:, pheno].dot(y_hat[:, pheno])
         # numerators = X.T.dot(y_hat)  # majority of time
         beta[pheno] = numerators[:, pheno] / var_X
-        chisq[pheno] = (N - 2) / (var_y * var_X / numerators[:, pheno] ** 2 - 1)
+        chisq[pheno] = (N - W.shape[1]) / (var_y * var_X / numerators[:, pheno] ** 2)
         # for v in range(M):
         #     beta[pheno, v] = numerators[v] / var_X[v]
         #     chisq[pheno, v] = (N - 2) / (var_y * var_X[v] / numerators[v] ** 2 - 1)
