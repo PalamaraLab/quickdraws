@@ -151,6 +151,13 @@ parser.add_argument(
     choices=["approx", "exact"],
     default="exact",
 )
+parser.add_argument(
+    "--binary",
+    help="Is the phenotype binary ?",
+    action="store_const",
+    const=True,
+    default=False,
+)
 
 ## wandb arguments
 wandb_group = parser.add_argument_group("WandB")
@@ -179,11 +186,11 @@ assert (args.calibrate and args.unrel_sample_list is not None) or (not args.cali
 ######      Preprocessing the phenotypes      ######
 st = time.time()
 print("Preprocessing the phenotypes..")
-adj_pheno_file = ".".join([args.output, "adjusted_traits", "phen"])
-Traits, sample_indices = preprocess_phenotypes(
+pheno_covareffect = ".".join([args.output, "traits_covareffects"])
+Traits, covar_effects, sample_indices = preprocess_phenotypes(
     args.pheno, args.covar, args.bed, args.removeFile
 )
-PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
+PreparePhenoRHE(Traits, covar_effects, args.bed, pheno_covareffect, None)
 print("Done in " + str(time.time() - st) + " secs")
 
 ######      Run RHE-MC for h2 estimation      ######
@@ -200,11 +207,12 @@ if args.h2_file is None:
         )
     VC = runRHE(
         args.bed,
-        adj_pheno_file + ".rhe",
+        pheno_covareffect + ".rhe",
         args.modelSnps,
         args.annot,
         args.output + ".rhe.log",
         args.rhemc,
+        args.covar,
         args.output,
     )
     print("Done in " + str(time.time() - st) + " secs")
@@ -217,7 +225,7 @@ if args.hdf5 is None:
     st = time.time()
     print("Converting Bed file to HDF5..")
     hdf5_filename = convert_to_hdf5(
-        args.bed, adj_pheno_file, sample_indices, args.output, args.modelSnps
+        args.bed, pheno_covareffect, sample_indices, args.output, args.modelSnps
     )
     print("Done in " + str(time.time() - st) + " secs")
 else:

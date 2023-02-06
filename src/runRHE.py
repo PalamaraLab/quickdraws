@@ -127,7 +127,14 @@ def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
 
 
 def runRHE(
-    bedfile, pheno, snps_to_keep_filename, annotation, savelog, rhemc, out="out"
+    bedfile,
+    pheno,
+    snps_to_keep_filename,
+    annotation,
+    savelog,
+    rhemc,
+    covariates=None,
+    out="out",
 ):
     """
     A wrapper that prepares a file with SNP annotations (if needed), runs RHE on the background,
@@ -181,18 +188,15 @@ def runRHE(
     N_phen = pd.read_csv(pheno, sep="\s+").shape[1] - 2
     # now run RHE
     if True:
-        cmd = (
-            "./"
-            + rhemc
-            + " -g "
-            + bedfile
-            + " -p "
-            + pheno
-            + " -annot "
-            + annotation
-            + " -k 50 -jn 10 > "
-            + savelog
-        )
+        cmd = "./" + rhemc + " -g " + bedfile + " -p " + pheno + " -annot " + annotation
+        if covariates is not None:
+            pheno_df = pd.read_csv(pheno, sep="\s+")
+            covariates_df = pd.read_csv(covariates, sep="\s+")
+            covar_df_cols = covariates_df.columns.tolist()
+            covariates_df = pd.merge(covariates_df, pheno_df)[covar_df_cols]
+            covariates_df.to_csv(covariates + ".rhe", sep="\t", index=None, na_rep="NA")
+            cmd += " -c " + covariates + ".rhe"
+        cmd += " -k 50 -jn 10 > " + savelog
         print("Invoking RHE as", cmd)
         _ = subprocess.run(cmd, shell=True)
 

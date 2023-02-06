@@ -21,8 +21,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from joblib import Parallel, delayed
 
-import bitsandbytes as bnb
+# import bitsandbytes as bnb
 import gc
+import pdb
 
 
 def str_to_bool(s: str) -> bool:
@@ -169,9 +170,12 @@ class Model(nn.Module):
             print("Initializing posterior spike through transfer learning")
             self.sc1.spike1.data = spike.to(self.sc1.spike1.device)
 
-    def forward(self, x, only_output=False, test=False):
+    def forward(self, x, offset, only_output=False, test=False, binary=False):
         num_batches = x.shape[0]
         x, reg = self.sc1(x, self.fc1, only_output, test)
+        x = x + offset
+        if binary:
+            x = torch.sigmoid(x + offset)
         return x, reg * num_batches
 
 
@@ -206,16 +210,25 @@ class HDF5Dataset:
             self.output = torch.as_tensor(
                 np.array(h5py_file[phen_col][0:train_samples], dtype=float)
             ).float()
+            self.covar_effect = torch.as_tensor(
+                np.array(h5py_file["covar_effect"][0:train_samples], dtype=float)
+            ).float()
         elif split == "test":
             self.hap1 = np.array(h5py_file["hap1"][train_samples:])
             self.hap2 = np.array(h5py_file["hap2"][train_samples:])
             self.output = torch.as_tensor(
                 np.array(h5py_file[phen_col][train_samples:], dtype=float)
             ).float()
+            self.covar_effect = torch.as_tensor(
+                np.array(h5py_file["covar_effect"][train_samples:], dtype=float)
+            ).float()
         else:
             self.hap1, self.hap2 = h5py_file["hap1"][:], h5py_file["hap2"][:]
             self.output = torch.as_tensor(
                 np.array(h5py_file[phen_col][:], dtype=float)
+            ).float()
+            self.covar_effect = torch.as_tensor(
+                np.array(h5py_file["covar_effect"][:], dtype=float)
             ).float()
 
         # self.output = self.output[:, 1]  ## 1 phenotype
@@ -249,9 +262,10 @@ class HDF5Dataset:
         )
         input = input[0 : self.num_snps] - self.mean_genotype
         output = self.output[index]
+        covar_effect = self.covar_effect[index]
         if self.transform is not None:
             input = self.transform(input)
-        return (input, output)
+        return (input, covar_effect, output)
 
     def __len__(self):
         return self.length
@@ -307,7 +321,7 @@ class Trainer:
         self.optimizer_list = []
         for model_no, model in enumerate(model_list):
             self.optimizer_list.append(
-                bnb.optim.Adam(
+                torch.optim.Adam(
                     model.parameters(),
                     lr=lr[model_no // self.num_chr]
                     if len(lr) != len(model_list)
@@ -315,7 +329,7 @@ class Trainer:
                     eps=adam_eps,
                     weight_decay=weight_decay,
                     betas=(0.9, 0.995),
-                    optim_bits=8,
+                    # optim_bits=8,
                 )
             )
         if self.args.cosine_scheduler:
@@ -329,7 +343,11 @@ class Trainer:
                     )
                 )
         self.mse_loss = nn.MSELoss(reduction="none")
-        self.loss_func = self.masked_mse_loss  # nn.MSELoss(reduction="sum")  #
+        self.bce_loss = nn.BCELoss(reduction="none")
+        self.loss_func = (
+            self.masked_mse_loss if not args.binary else self.masked_bce_loss
+        )
+        ## TODO: write a masked BCE loss function
         self.wandb_step = 1
         self.train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
@@ -345,6 +363,17 @@ class Trainer:
             num_workers=self.args.num_workers,
             pin_memory=self.args.num_workers > 0,
         )
+
+    ## masked BCE loss function
+    def masked_bce_loss(self, preds, labels, h2=0.5):
+        mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
+        if type(h2) == torch.Tensor:
+            loss = self.bce_loss(preds[mask], labels[mask]) / (2 * (1 - h2[mask]))
+        else:
+            loss = self.bce_loss(preds[mask], labels[mask]) / (2 * (1 - h2))
+
+        ## multiply by 2 here as we divide by 2 later
+        return 2 * torch.sum(loss)  ## reduction = sum
 
     def masked_mse_loss(self, preds, labels, h2=0.5):
         mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
@@ -365,10 +394,20 @@ class Trainer:
         labels_arr = [[] for _ in range(len(self.model_list))]
         preds_arr = [[] for _ in range(len(self.model_list))]
         with torch.no_grad():
-            for input, label in self.test_dataloader:
-                input, label = input.to(self.device), label.to(self.device)
+            for input, covar_effect, label in self.test_dataloader:
+                input, covar_effect, label = (
+                    input.to(self.device),
+                    covar_effect.to(self.device),
+                    label.to(self.device),
+                )
                 for model_no, model in enumerate(self.model_list):
-                    preds, _ = model(input, only_output=True, test=True)
+                    preds, _ = model(
+                        input,
+                        covar_effect,
+                        only_output=True,
+                        test=True,
+                        binary=self.args.binary,
+                    )
                     label[torch.isnan(label)] = preds[torch.isnan(label)]
                     preds_arr[model_no].extend(preds.cpu().numpy().tolist())
                     labels_arr[model_no].extend(label.cpu().numpy().tolist())
@@ -423,20 +462,22 @@ class Trainer:
                 ] = test_loss_anc.cpu().numpy() / len(preds_arr[model_no])
         return log_dict
 
-    def save_residuals(self, best_alpha, out=None):
-        ## Saves the residuals (y - \beta x) for the entire dataset in a text file
+    def save_estimates(self, best_alpha, out=None):
+        ## Saves the estimates (\beta x) for the entire dataset in a text file
         ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
         test_loss, preds_arr, labels_arr = self.validation()
-        residuals = np.zeros((preds_arr.shape[1], preds_arr.shape[2]))
+        estimates = np.zeros((preds_arr.shape[1], preds_arr.shape[2]))
         for prs_no in range(preds_arr.shape[2]):
-            residuals[:, prs_no] = (
-                labels_arr[best_alpha[prs_no], :, prs_no]
-                - preds_arr[best_alpha[prs_no], :, prs_no]
-            )
+            if self.args.binary:
+                estimates[:, prs_no] = torch.logit(
+                    preds_arr[best_alpha[prs_no], :, prs_no]
+                )
+            else:
+                estimates[:, prs_no] = preds_arr[best_alpha[prs_no], :, prs_no]
         if out is not None:
-            pd.DataFrame(residuals).to_csv(out + ".residuals", sep="\t")
+            pd.DataFrame(estimates).to_csv(out + ".estimates", sep="\t")
         else:
-            return residuals
+            return estimates
 
     def save_blup_estimates(self, best_alpha, out=None):
         ## Saves the BLUP estimates \beta trained in a text file
@@ -454,14 +495,14 @@ class Trainer:
         else:
             return beta
 
-    def save_approx_blup_residuals(self, best_alpha, out):
-        ## Saves the approximate LOCO residuals for the entire dataset in a text file
+    def save_approx_blup_estimates(self, best_alpha, out):
+        ## Saves the approximate LOCO estimates for the entire dataset in a text file
         ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
         dim_out, dim_in = self.model_list[0].fc1.weight.shape
-        loco_residuals = np.zeros(
+        loco_estimates = np.zeros(
             (len(torch.unique(self.chr_map)), self.num_samples, dim_out)
         )
-        all_chr_residuals = self.save_residuals(best_alpha)
+        all_chr_estimates = self.save_estimates(best_alpha)
 
         with torch.no_grad():
             beta = torch.zeros((dim_in, dim_out), device="cuda")
@@ -476,21 +517,29 @@ class Trainer:
 
             assert len(beta) == len(self.chr_map)
             prev = 0
-            for input, label in self.test_dataloader:
+            for input, covar_effect, label in self.test_dataloader:
                 input = input.to(self.device)
                 for chr_no, chr in enumerate(torch.unique(self.chr_map)):
                     ### zero the betas for other chromosome
                     beta_c = beta[self.chr_map == chr]
                     beta_c = beta_c.float()
-                    preds = (input[:, self.chr_map == chr]) @ beta_c
-                    loco_residuals[chr_no, prev : prev + len(input)] = (
-                        all_chr_residuals[prev : prev + len(input)]
-                        + preds.detach().cpu().numpy()
-                    )
+                    preds = (input[:, self.chr_map == chr]) @ beta_c + covar_effect
+                    if self.args.binary:
+                        loco_estimates[
+                            chr_no, prev : prev + len(input)
+                        ] = torch.sigmoid(
+                            all_chr_estimates[prev : prev + len(input)]
+                            - preds.detach().cpu().numpy()
+                        )
+                    else:
+                        loco_estimates[chr_no, prev : prev + len(input)] = (
+                            all_chr_estimates[prev : prev + len(input)]
+                            - preds.detach().cpu().numpy()
+                        )
                 prev += len(input)
             for chr_no, chr in enumerate(torch.unique(self.chr_map)):
-                pd.DataFrame(loco_residuals[chr_no]).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".residuals", sep="\t"
+                pd.DataFrame(loco_estimates[chr_no]).to_csv(
+                    out + "loco_chr" + str(int(chr)) + ".estimates", sep="\t"
                 )
 
     def save_variational_parameters(self, best_alpha, out):
@@ -524,15 +573,19 @@ class Trainer:
                 )
             np.savetxt(out + ".alpha", self.alpha[best_alpha])
 
-    def save_exact_blup_residuals(self, best_alpha, out):
-        ## Saves the exact LOCO residuals for the entire dataset in a text file
+    def save_exact_blup_estimates(self, best_alpha, out):
+        ## Saves the exact LOCO estimates for the entire dataset in a text file
         ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
         dim_out = len(self.h2)
-        loco_residuals = np.zeros((self.num_chr, self.num_samples, dim_out))
+        loco_estimates = np.zeros((self.num_chr, self.num_samples, dim_out))
         with torch.no_grad():
             prev = 0
-            for input, label in self.test_dataloader:
-                input, label = input.to(self.device), label.to(self.device)
+            for input, covar_effect, label in self.test_dataloader:
+                input, covar_effect, label = (
+                    input.to(self.device),
+                    covar_effect.to(self.device),
+                    label.to(self.device),
+                )
                 for model_no, model in enumerate(self.model_list):
                     chr_no = model_no % self.num_chr
                     phen_no = self.pheno_for_model[model_no // self.num_chr]
@@ -542,32 +595,50 @@ class Trainer:
                     preds = (input[:, self.chr_map != self.unique_chr_map[chr_no]]) @ (
                         beta.T
                     )
-                    loco_residuals[chr_no][prev : prev + len(input)][:, phen_no] = (
-                        (label[:, phen_no] - preds).detach().cpu().numpy()
-                    )
+                    if self.args.binary:
+                        loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = (
+                            (torch.sigmoid(covar_effect[:, phen_no] + preds))
+                            .detach()
+                            .cpu()
+                            .numpy()
+                        )
+                    else:
+                        loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = (
+                            (covar_effect[:, phen_no] + preds).detach().cpu().numpy()
+                        )
                 prev += len(input)
             for chr_no, chr in enumerate(torch.unique(self.chr_map)):
-                pd.DataFrame(loco_residuals[chr_no]).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".residuals", sep="\t"
+                pd.DataFrame(loco_estimates[chr_no]).to_csv(
+                    out + "loco_chr" + str(int(chr)) + ".estimates", sep="\t"
                 )
 
     def train_epoch(self, epoch):
-        for input, label in self.train_dataloader:
+        for input, covar_effect, label in self.train_dataloader:
             log_dict = {}
-            input, label = input.to(self.device), label.to(self.device)
+            input, covar_effect, label = (
+                input.to(self.device),
+                covar_effect.to(self.device),
+                label.to(self.device),
+            )
             mask = ~(torch.isnan(label).all(axis=1))  ## remove samples with all nans
-            input, label = input[mask], label[mask]
+            input, covar_effect, label = input[mask], covar_effect[mask], label[mask]
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
+            covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
             mse_loss_arr = []
             reg_loss_arr = []
             total_loss_arr = []
             for model_no, model in enumerate(self.model_list):
-                preds, reg_loss = model(input)
-                mse_loss = self.loss_func(label_4x, preds, h2)
+                preds, reg_loss = model(input, covar_effect_4x, binary=self.args.binary)
+                mse_loss = self.loss_func(preds, label_4x, h2)
                 for k in range(self.args.forward_passes - 1):
-                    preds, _ = model(input, only_output=True)
-                    mse1 = self.loss_func(label_4x, preds, h2)
+                    preds, _ = model(
+                        input,
+                        covar_effect_4x,
+                        only_output=True,
+                        binary=self.args.binary,
+                    )
+                    mse1 = self.loss_func(preds, label_4x, h2)
                     mse_loss = mse_loss + mse1
                 mse_loss = (
                     mse_loss / 2 / self.args.forward_passes
@@ -626,7 +697,8 @@ class Trainer:
                             grad_norm += p.grad.data.norm(2).item()
                         log_dict["grad_norm_" + str(alpha)] = grad_norm
 
-                wandb.log(log_dict, step=self.wandb_step)
+                if not self.args.wandb_mode == "disabled":
+                    wandb.log(log_dict, step=self.wandb_step)
             self.wandb_step += 1
 
         if hasattr(self, "scheduler_list"):
@@ -635,14 +707,17 @@ class Trainer:
         return log_dict
 
     def train_epoch_loco(self, epoch):
-        for input, label in self.train_dataloader:
-            log_dict = {}
-            mse_loss_total, reg_loss_total, total_loss_total = 0, 0, 0
-            input, label = input.to(self.device), label.to(self.device)
+        for input, covar_effect, label in self.train_dataloader:
+            input, covar_effect, label = (
+                input.to(self.device),
+                covar_effect.to(self.device),
+                label.to(self.device),
+            )
             mask = ~(torch.isnan(label).all(axis=1))  ## remove samples with all nans
-            input, label = input[mask], label[mask]
+            input, covar_effect, label = input[mask], covar_effect[mask], label[mask]
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
+            covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
             for model_no, model in enumerate(self.model_list):
                 input_loco_chr = torch.hstack(
                     (
@@ -650,10 +725,16 @@ class Trainer:
                         input[:, self.chr_loc[model_no % self.num_chr + 1] :],
                     )
                 )
-                preds, reg_loss = model(input_loco_chr)
+                preds, reg_loss = model(
+                    input_loco_chr,
+                    covar_effect_4x[
+                        :, :, self.pheno_for_model[model_no // self.num_chr]
+                    ],
+                    binary=self.args.binary,
+                )
                 mse_loss = self.loss_func(
-                    label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
                     preds,
+                    label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
                     h2[:, :, self.pheno_for_model[model_no // self.num_chr]],
                 )
                 loss = 0.5 * mse_loss + reg_loss
@@ -810,7 +891,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=-1,
+        validate_every=3,
     )
     ##caution!!
     for epoch in tqdm(range(30)):
@@ -932,7 +1013,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     with torch.no_grad():
         torch.cuda.empty_cache()
 
-    print("Calculating Residuals using entire dataset..")
+    print("Calculating estimates using entire dataset..")
     start_time = time.time()
     trainer = Trainer(
         args,
@@ -954,7 +1035,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         for epoch in tqdm(range(args.num_epochs)):
             _ = trainer.train_epoch_loco(epoch)
 
-    ## Calculate residuals
+    ## Calculate estimates
 
     print("Done fitting the model in: " + str(time.time() - start_time) + " secs")
 
@@ -966,9 +1047,9 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
             "Done writing BLUP estimates in: " + str(time.time() - start_time) + " secs"
         )
 
-        print("Saving approximate LOCO residuals..")
+        print("Saving approximate LOCO estimates..")
         start_time = time.time()
-        trainer.save_approx_blup_residuals(
+        trainer.save_approx_blup_estimates(
             np.argmax(output_r2_subset, axis=1), args.output
         )
         print(
@@ -977,12 +1058,12 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
             + " secs"
         )
     else:
-        print("Saving exact LOCO residuals..")
+        print("Saving exact LOCO estimates..")
         start_time = time.time()
         trainer.save_variational_parameters(
             np.argmax(output_r2_subset, axis=1), args.output
         )
-        trainer.save_exact_blup_residuals(
+        trainer.save_exact_blup_estimates(
             np.argmax(output_r2_subset, axis=1), args.output
         )
         print(
@@ -1111,6 +1192,6 @@ if __name__ == "__main__":
 
     assert args.train_split < 1 and args.train_split > 0
     h2 = np.loadtxt(args.h2_file)
-    residuals_filename = blr_spike_slab(args, h2, args.hdf5_filename)
+    estimates_filename = blr_spike_slab(args, h2, args.hdf5_filename)
 
 # python blr.py --hdf5_filename  --h2_file

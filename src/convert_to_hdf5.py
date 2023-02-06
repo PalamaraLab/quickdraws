@@ -13,7 +13,7 @@ from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 
 def convert_to_hdf5(
     bed,
-    pheno,
+    pheno_covareffect,
     sample_indices,
     out="out",
     snps_to_keep_filename=None,
@@ -25,7 +25,7 @@ def convert_to_hdf5(
     h1 = h5py.File(out + ".hdf5", "w")
 
     ## handle phenotypes here
-    phenotype = pd.read_csv(pheno, sep="\s+")
+    pheno_covareffect = pd.read_csv(pheno_covareffect, sep="\s+")
     snp_on_disk = Bed(bed, count_A1=True)
 
     chunk_size = min(chunk_size, snp_on_disk.shape[0])
@@ -53,8 +53,16 @@ def convert_to_hdf5(
     print("Total samples = " + str(total_samples))
 
     ## store the PRS / phenotype
-    y = phenotype[phenotype.columns[2:]].values
+    pheno_columns = pheno_covareffect.columns[
+        2 : (len(pheno_covareffect.columns) - 2) // 2 + 2
+    ]
+    covareffect_columns = pheno_covareffect.columns[
+        (len(pheno_covareffect.columns) - 2) // 2 + 2 :
+    ]
+    y = pheno_covareffect[pheno_columns].values
+    z = pheno_covareffect[covareffect_columns].values
     ## handle genotypes here
+    dset0 = h1.create_dataset("phenotype_columns", data=pheno_columns.tolist())
     dset1 = h1.create_dataset(
         "hap1",
         (total_samples, int(np.ceil(total_snps / 8))),
@@ -70,6 +78,7 @@ def convert_to_hdf5(
         dtype=np.uint8,
     )
     dset3 = h1.create_dataset("phenotype", data=y, dtype=float)
+    dset35 = h1.create_dataset("covar_effect", data=z, dtype=float)
     dset4 = h1.create_dataset("mean_genotype", (total_snps,), dtype=float)
     dset5 = h1.create_dataset("std_genotype", (total_snps,), dtype=float)
     dset6 = h1.create_dataset("sample_indices", data=sample_indices, dtype=int)
@@ -155,14 +164,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.bed is not None and args.pheno is not None:
-        adj_pheno_file = ".".join([args.output, "adjusted_traits", "phen"])
-        Traits, sample_indices = preprocess_phenotypes(
+        pheno_covareffect = ".".join([args.output, "traits_covareffects"])
+        Traits, covar_effects, sample_indices = preprocess_phenotypes(
             args.pheno, args.covar, args.bed, args.removeFile
         )
-        PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
+        PreparePhenoRHE(Traits, covar_effects, args.bed, pheno_covareffect, None)
 
         filename = convert_to_hdf5(
-            args.bed, adj_pheno_file, sample_indices, args.output, args.modelSnps
+            args.bed, pheno_covareffect, sample_indices, args.output, args.modelSnps
         )
     if args.bgen is not None and args.sample is not None:
         load_bgen_tempfiles(args)

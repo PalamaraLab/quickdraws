@@ -6,8 +6,10 @@ import pandas as pd
 import numpy as np
 from pysnptools.snpreader import Bed
 import argparse
+from sklearn.linear_model import LogisticRegression
 import os
 import pdb
+from scipy.special import expit
 
 
 def preprocess_phenotypes(pheno, covar, bed, removeFile):
@@ -27,7 +29,7 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
     N_phen = Traits.shape[1] - 2  # exclude FID, IID
 
     if N_phen > 50:
-        raise "RHE doesn't work more than 50 phenotypes at once, try supplying atmost 50 phenotypes at once"
+        raise "RHE doesn't work for more than 50 phenotypes at once, try supplying atmost 50 phenotypes at once"
 
     print("{0} phenotypes were loaded for {1} samples.".format(N_phen, Traits.shape[0]))
     # remove those without genotypes
@@ -46,10 +48,38 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
     )
     Traits.drop(Traits.FID.iloc[samples_with_missing], axis=0, inplace=True)
 
-    ### Mean impute the missing values, to keep things simple ahead
-    for phen_col in Traits.columns[2:]:
-        Traits[phen_col] = Traits[phen_col].fillna(Traits[phen_col].mean())
-    assert sum(Traits.isna().sum()) == 0
+    ## check if any trait is less than 50% phenotyped
+    traits_with_missing = np.where(
+        Traits.isna().sum(axis=0) / Traits.shape[0] > phen_thres
+    )[0]
+    print(
+        "{0} traits are less than {1}% phenotyped and will be excluded.".format(
+            len(traits_with_missing), 100 * phen_thres
+        )
+    )
+    Traits.drop(Traits.columns[traits_with_missing], axis=1, inplace=True)
+
+    ## check if any trait is unary
+    traits_unary = np.where(Traits.nunique() == 1)[0]
+    print("{0} traits are unary and will be excluded.".format(len(traits_unary)))
+    Traits.drop(Traits.columns[traits_unary], axis=1, inplace=True)
+
+    ### Median impute the missing values, to keep things simple ahead
+    # for phen_col in Traits.columns[2:]:
+    #     Traits[phen_col] = Traits[phen_col].fillna(Traits[phen_col].mean())
+    # assert sum(Traits.isna().sum()) == 0
+
+    ## check if traits are binary and if nunique == 2 make them binary
+    # if np.all(Traits.iloc[:, 2:].nunique() == 2):
+    #     unique_vals = np.unique(Traits.iloc[:, 2:])
+    #     for col in Traits.columns[2:]:
+    #         Traits[col] = Traits[col] == unique_vals[1]
+    #         Traits[col] = Traits[col].astype(int)
+    #     print("Identified {0} binary traits.".format(Traits.shape[1] - 2))
+    #     binary = True
+    # else:
+    binary = False
+    ################ CAUTION #######################
 
     ### covariate adjustment
     if covar is not None:
@@ -75,12 +105,15 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
         )
         for col in trait_columns:
             Trait = merged_df[col]
-            Trait -= W.dot(np.linalg.inv(W.T.dot(W))).dot(W.T.dot(Trait))
-            merged_df[col] = (Trait - np.mean(Trait)) / np.std(Trait)
-        print(
-            "The traits are now adjusted with respect to the covariates, mean-centered and of unit variance."
-        )
-        Traits = merged_df[["FID", "IID"] + trait_columns.tolist()]
+            # Trait -= W.dot(np.linalg.inv(W.T.dot(W))).dot(W.T.dot(Trait))
+            if not binary:
+                merged_df["covar_effect_" + str(col)] = W.dot(
+                    np.linalg.inv(W.T.dot(W))
+                ).dot(W.T.dot(Trait))
+            else:
+                clf = LogisticRegression(random_state=0, max_iter=5000).fit(W, Trait)
+                merged_df["covar_effect_" + str(col)] = (clf.coef_ @ (W.T)).flatten()
+            # merged_df[col] = (Trait - np.mean(Trait)) / np.std(Trait)
     else:
         print("\nWARNING: No covariates will be used! Are the traits already adjusted?")
         samples_to_keep = set(samples_geno).intersection(Traits.FID)
@@ -92,12 +125,24 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
             N_total,
         )
 
-        for T in range(N_phen):
-            Trait = Traits.iloc[:, T + 2]
-            Trait -= np.mean(Trait)
-            Traits.iloc[:, T + 2] = Trait / np.std(Trait)
-        print("The traits are now mean-centered and of unit variance.")
+        for col in trait_columns:
+            Trait = merged_df[col]
+            # Trait -= np.mean(Trait)
+            if not binary:
+                merged_df["covar_effect_" + str(col)] = np.mean(Trait)
+            else:
+                clf = LogisticRegression(random_state=0, max_iter=5000).fit(
+                    np.ones((N_total, 1)), Trait
+                )
+                merged_df["covar_effect_" + str(col)] = (
+                    clf.coef_ @ (np.ones((N_total, 1)).T)
+                ).flatten()
+            # Traits.iloc[:, T + 2] = Trait / np.std(Trait)
 
+    Traits = merged_df[["FID", "IID"] + trait_columns.tolist()]
+    covar_effects = merged_df[
+        ["FID", "IID"] + ["covar_effect_" + str(col) for col in trait_columns.tolist()]
+    ]
     sample_indices_to_keep_dict = {}
     for i in range(len(snp_on_disk.iid)):
         if int(snp_on_disk.iid[i, 0]) in samples_to_keep:
@@ -107,32 +152,24 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
     for i in Traits.FID:
         sample_indices_to_keep.append(sample_indices_to_keep_dict[int(i)])
 
-    return Traits, np.array(sample_indices_to_keep)
+    return (
+        Traits,
+        covar_effects,
+        np.array(sample_indices_to_keep),
+    )
 
 
-def PreparePhenoRHE(Trait, bed, filename, unrel_homo_samples=None):
+def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None):
     """
-    Create a new tsv file, with labels [FID, IID, Trait] that is aligned with the given fam file,
-    as is required for RHEmc. Trait is assumed to be a dataframe, as usually.
+    Create a new tsv file, with labels [FID, IID, original phenotype, covariate effects] that is aligned with the given fam file,
+    Create another tsv file as is required for RHEmc. Trait is assumed to be a dataframe, as usually.
     """
     Trait = Trait.reset_index(drop=True)
-    Trait.to_csv(filename, index=None, sep="\t", na_rep="NA")
+    covar_effect = covar_effect.reset_index(drop=True)
+    Trait_covar = pd.merge(Trait, covar_effect, on=["FID", "IID"])
+    Trait_covar.to_csv(filename, index=None, sep="\t", na_rep="NA")
 
     snp_on_disk = Bed(bed, count_A1=True)
-
-    # if snps_to_keep_filename is None:
-    #     total_snps = snp_on_disk.sid_count
-    #     snp_mask = np.ones(total_snps, dtype="bool")
-    # else:
-    #     snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
-    #     snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
-    #     snp_dict = {}
-    #     total_snps = snp_on_disk.sid_count
-    #     snp_mask = np.zeros(total_snps, dtype="bool")
-    #     for snp_no, snp in enumerate(snp_on_disk.sid):
-    #         snp_dict[snp] = snp_no
-    #     for snp in snps_to_keep:
-    #         snp_mask[snp_dict[snp]] = True
 
     if unrel_homo_samples is not None:
         unrel_homo_samples = pd.read_csv(
@@ -143,28 +180,6 @@ def PreparePhenoRHE(Trait, bed, filename, unrel_homo_samples=None):
         print("Number of unrelated homogenous samples: " + str(len(unrel_sample_list)))
     else:
         unrel_sample_list = np.array(snp_on_disk.iid[:, 0].tolist(), dtype="int")
-
-    # sample_dict = {}
-    # for i in range(len(snp_on_disk.iid)):
-    #     if int(snp_on_disk.iid[i, 0]) in unrel_sample_list:
-    #         sample_dict[int(snp_on_disk.iid[i, 0])] = i
-
-    # unrel_sample_indices = []
-    # for i in unrel_sample_list:
-    #     unrel_sample_indices.append(sample_dict[i])
-
-    # sdata = snp_on_disk[unrel_sample_indices, snp_mask].read(
-    #     dtype="int8", _require_float32_64=False
-    # )
-    # Bed.write(
-    #     filename + ".bed",
-    #     sdata,
-    #     count_A1=True,
-    # )
-    # bim_file = pd.read_csv(bed + ".bim", sep="\s+", header=None)
-    # bim_file.loc[snp_mask].to_csv(
-    #     str(filename) + ".bim", sep="\t", index=None, header=None
-    # )
 
     unrel_pheno = []
     for sample in unrel_sample_list:
