@@ -175,7 +175,7 @@ class Model(nn.Module):
         x, reg = self.sc1(x, self.fc1, only_output, test)
         x = x + offset
         if binary:
-            x = torch.sigmoid(x + offset)
+            x = torch.sigmoid(x)
         return x, reg * num_batches
 
 
@@ -475,7 +475,7 @@ class Trainer:
             else:
                 estimates[:, prs_no] = preds_arr[best_alpha[prs_no], :, prs_no]
         if out is not None:
-            pd.DataFrame(estimates).to_csv(out + ".estimates", sep="\t")
+            pd.DataFrame(estimates).to_csv(out + ".offsets", sep="\t")
         else:
             return estimates
 
@@ -539,7 +539,7 @@ class Trainer:
                 prev += len(input)
             for chr_no, chr in enumerate(torch.unique(self.chr_map)):
                 pd.DataFrame(loco_estimates[chr_no]).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".estimates", sep="\t"
+                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t"
                 )
 
     def save_variational_parameters(self, best_alpha, out):
@@ -609,7 +609,7 @@ class Trainer:
                 prev += len(input)
             for chr_no, chr in enumerate(torch.unique(self.chr_map)):
                 pd.DataFrame(loco_estimates[chr_no]).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".estimates", sep="\t"
+                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t"
                 )
 
     def train_epoch(self, epoch):
@@ -867,7 +867,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     print("Done loading in: " + str(time.time() - start_time) + " secs")
     # Define model and enable wandb live policy
     std_genotype = torch.as_tensor(train_dataset.std_genotype).float()
-    std_y = torch.std(train_dataset.output, axis=0).float()
+    std_y = torch.std(train_dataset.output - train_dataset.covar_effect, axis=0).float()
     h2 = torch.as_tensor(h2).float()
 
     model_list = initialize_model(
@@ -891,7 +891,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=3,
+        validate_every=-1,
     )
     ##caution!!
     for epoch in tqdm(range(30)):
@@ -990,7 +990,9 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     std_genotype = torch.as_tensor(
         full_dataset.std_genotype, dtype=torch.float32
     )  # .to(device)
-    std_y = torch.std(full_dataset.output, axis=0)  # .to(device)
+    std_y = torch.std(
+        full_dataset.output - full_dataset.covar_effect, axis=0
+    )  # .to(device)
     h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
     chr_map = full_dataset.chr  # .to(device)
     model_list = initialize_model(

@@ -7,6 +7,7 @@ from tqdm import tqdm
 import numba
 import copy
 import time
+import pdb
 
 
 def preprocess_covars(covarFile, iid_fid):
@@ -86,7 +87,7 @@ def check_residuals_same_order(residualFileList):
 
 
 @numba.jit(nopython=True, parallel=True)
-def MyLinRegr(X, Y, W):
+def MyLinRegr(X, Y, W, offset):
     """
     Author: Yiorgos + Hrushi
     DIY Linear regression with covariates and low memory footprint.
@@ -112,28 +113,26 @@ def MyLinRegr(X, Y, W):
     var_X = np.array(
         [X[:, v].dot(X[:, v]) - temp[:, v].dot(K.dot(temp[:, v])) for v in range(M)]
     )
+    Y = Y - offset
     y_hat = Y - W.dot(K.dot(W.T.dot(Y)))
     numerators = X.T.dot(y_hat)
     for pheno in numba.prange(Y.shape[1]):
-        # y_hat = Y[:, pheno] - W.dot(K.dot(W.T.dot(Y[:, pheno])))
         var_y = Y[:, pheno].dot(y_hat[:, pheno])
-        # numerators = X.T.dot(y_hat)  # majority of time
         beta[pheno] = numerators[:, pheno] / var_X
-        chisq[pheno] = (N - W.shape[1]) / (var_y * var_X / numerators[:, pheno] ** 2)
-        # for v in range(M):
-        #     beta[pheno, v] = numerators[v] / var_X[v]
-        #     chisq[pheno, v] = (N - 2) / (var_y * var_X[v] / numerators[v] ** 2 - 1)
+        chisq[pheno] = (N - 2) / (var_y * var_X / numerators[:, pheno] ** 2 - 1)
     return beta, chisq, afreq
 
 
 def get_unadjusted_test_statistics(
     bedFile,
-    residualFileList,
+    phenoFileList,
+    offsetFileList,
     covarFile,
     out,
     unique_chrs,
     num_threads=-1,
     max_memory=7500,
+    binary=False,
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -141,14 +140,12 @@ def get_unadjusted_test_statistics(
     snp_on_disk = Bed(bedFile, count_A1=True)
     chr_map = np.array(snp_on_disk.pos[:, 0], dtype="int")  ## chr_no
 
-    # check_residuals_same_order(residualFileList)
-
-    residuals = pd.read_csv(residualFileList[0], sep="\s+")
+    offset = pd.read_csv(offsetFileList[0], sep="\s+")
     samples_dict = {}
     for i, fid in enumerate(snp_on_disk.iid[:, 0]):
         samples_dict[int(fid)] = i
     sample_indices = []
-    for fid in residuals.FID:
+    for fid in offset.FID:
         sample_indices.append(samples_dict[int(fid)])
     iid_fid = snp_on_disk.iid[sample_indices]
     snp_on_disk = snp_on_disk[sample_indices, :]
@@ -159,18 +156,21 @@ def get_unadjusted_test_statistics(
 
     ## calculate batch_size based on max_memory
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0])
-    beta_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)))
-    chisq_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)))
+    beta_arr = np.zeros((offset.shape[1] - 2, len(chr_map)))
+    chisq_arr = np.zeros((offset.shape[1] - 2, len(chr_map)))
     afreq_arr = np.zeros(len(chr_map))
 
-    print("Running linear regression to get association")
+    print("Running linear/logistic regression to get association")
 
     prev = 0
     for chr_no, chr in enumerate(np.unique(chr_map)):
-        ## read residuals file and adjust it
-        residuals = pd.read_csv(residualFileList[chr_no], sep="\s+")
-        Y = np.array(residuals[residuals.columns[2:]].values, dtype="float32")
+        ## read offset file and adjust phenotype file
+        offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
+        pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
+        offset = offset[offset.columns[2:]].values.astype("float32")
+        Y = pheno[pheno.columns[2:]].values.astype("float32")
         Y -= np.mean(Y, axis=0)
+        offset -= np.mean(offset, axis=0)
 
         num_snps_in_chr = int(np.sum(chr_map == int(chr)))
         for batch in range(0, num_snps_in_chr, batch_size):
@@ -185,7 +185,8 @@ def get_unadjusted_test_statistics(
             )
 
             ## preprocess genotype and perform linear regression
-            beta, chisq, afreq = MyLinRegr(X, Y, covars)
+            if binary is False:
+                beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
 
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
@@ -201,7 +202,7 @@ def get_unadjusted_test_statistics(
 
     write_sumstats_file(
         bedFile,
-        residuals.columns[2:],
+        pd.read_csv(offsetFileList[chr_no], sep="\s+").columns[2:],
         snp_on_disk.shape[0],
         afreq_arr,
         beta_arr,
@@ -213,13 +214,15 @@ def get_unadjusted_test_statistics(
 def get_unadjusted_test_statistics_bgen(
     bgenFile,
     sampleFile,
-    residualFileList,
+    phenoFileList,
+    offsetFileList,
     covarFile,
     out,
     unique_chrs,
     snps_to_keep_filename=None,
     num_threads=-1,
     max_memory=7500,
+    binary=False,
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -258,15 +261,14 @@ def get_unadjusted_test_statistics_bgen(
 
         del snp_dict
     ### Caution!! only removed temporarily
-    # check_residuals_same_order(residualFileList)
 
-    residuals = pd.read_csv(residualFileList[0], sep="\s+")
+    offset = pd.read_csv(offsetFileList[0], sep="\s+")
 
     samples_dict = {}
     for i, fid in enumerate(fid_iid[:, 0]):
         samples_dict[int(fid)] = i
     sample_indices = []
-    for fid in residuals.FID:
+    for fid in offset.FID:
         sample_indices.append(samples_dict[int(fid)])
     iid_fid_in_bgen = fid_iid[sample_indices]
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
@@ -280,18 +282,21 @@ def get_unadjusted_test_statistics_bgen(
     ## calculate batch_size based on max_memory
     ## extra divide by 3 because bgen files give a distrution data as output (aa, Aa, AA)
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0] / 3)
-    beta_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)), dtype="float32")
-    chisq_arr = np.zeros((residuals.shape[1] - 2, len(chr_map)), dtype="float32")
+    beta_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
+    chisq_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
 
-    print("Running linear regression to get association")
+    print("Running linear/logistic regression to get association")
 
     prev = 0
     for chr_no, chr in enumerate(unique_chrs):
-        ## read residuals file and adjust it
-        residuals = pd.read_csv(residualFileList[chr_no], sep="\s+")
-        Y = np.array(residuals[residuals.columns[2:]].values, dtype="float32")
+        ## read offset file and adjust phenotype file
+        offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
+        offset = np.array(offset[offset.columns[2:]].values, dtype="float32")
+        pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
+        Y = pheno[pheno.columns[2:]].values.astype("float32")
         Y -= np.mean(Y, axis=0)
+        offset -= np.mean(offset, axis=0)
 
         num_snps_in_chr = int(np.sum(chr_map == int(chr)))
         for batch in tqdm(range(0, num_snps_in_chr, batch_size)):
@@ -308,7 +313,8 @@ def get_unadjusted_test_statistics_bgen(
             print("1: " + str(time.time() - st))
             st = time.time()
             ## preprocess genotype and perform linear regression
-            beta, chisq, afreq = MyLinRegr(X, Y, covars)
+            if binary is False:
+                beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
 
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
@@ -325,7 +331,7 @@ def get_unadjusted_test_statistics_bgen(
 
     write_sumstats_file_bgen(
         snp_on_disk,
-        residuals.columns[2:],
+        pd.read_csv(offsetFileList[chr_no], sep="\s+").columns[2:],
         snp_on_disk.shape[0],
         afreq_arr,
         beta_arr,

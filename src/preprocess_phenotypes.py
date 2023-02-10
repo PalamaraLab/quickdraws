@@ -70,15 +70,15 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
     # assert sum(Traits.isna().sum()) == 0
 
     ## check if traits are binary and if nunique == 2 make them binary
-    # if np.all(Traits.iloc[:, 2:].nunique() == 2):
-    #     unique_vals = np.unique(Traits.iloc[:, 2:])
-    #     for col in Traits.columns[2:]:
-    #         Traits[col] = Traits[col] == unique_vals[1]
-    #         Traits[col] = Traits[col].astype(int)
-    #     print("Identified {0} binary traits.".format(Traits.shape[1] - 2))
-    #     binary = True
-    # else:
-    binary = False
+    if np.all(Traits.iloc[:, 2:].nunique() == 2):
+        unique_vals = np.unique(Traits.iloc[:, 2:])
+        for col in Traits.columns[2:]:
+            Traits[col] = Traits[col] == unique_vals[1]
+            Traits[col] = Traits[col].astype(int)
+        print("Identified {0} binary traits.".format(Traits.shape[1] - 2))
+        binary = True
+    else:
+        binary = False
     ################ CAUTION #######################
 
     ### covariate adjustment
@@ -165,9 +165,16 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
     Create another tsv file as is required for RHEmc. Trait is assumed to be a dataframe, as usually.
     """
     Trait = Trait.reset_index(drop=True)
+    pheno_columns = Trait.columns[2:].tolist()
     covar_effect = covar_effect.reset_index(drop=True)
+    covar_columns = covar_effect.columns[2:].tolist()
     Trait_covar = pd.merge(Trait, covar_effect, on=["FID", "IID"])
-    Trait_covar.to_csv(filename, index=None, sep="\t", na_rep="NA")
+    Trait_covar[["FID", "IID"] + pheno_columns].to_csv(
+        filename + ".traits", index=None, sep="\t", na_rep="NA"
+    )
+    Trait_covar[["FID", "IID"] + covar_columns].to_csv(
+        filename + ".covar_effects", index=None, sep="\t", na_rep="NA"
+    )
 
     snp_on_disk = Bed(bed, count_A1=True)
 

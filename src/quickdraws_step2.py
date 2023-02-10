@@ -16,6 +16,7 @@ from distutils.util import strtobool
 import h5py
 import time
 from joblib import Parallel, delayed
+from scipy.special import expit
 
 from ldscore_calibration import calc_ldscore_chip, ldscore_intercept, get_mask_dodgy
 from custom_linear_regression import (
@@ -23,23 +24,24 @@ from custom_linear_regression import (
     get_unadjusted_test_statistics_bgen,
 )
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
+import pdb
 
 
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
 
 
-def preprocess_residuals(
-    bedfile, residuals, sample_indices, pheno_columns, sample_file=None
+def preprocess_offsets(
+    bedfile, offsets, sample_indices, pheno_columns, sample_file=None, adj_suffix=""
 ):
     snp_on_disk = Bed(bedfile, count_A1=True)
     iid_fid = snp_on_disk.iid[sample_indices]
     df_iid_fid = pd.DataFrame(np.array(iid_fid, dtype=int), columns=["FID", "IID"])
-    df_residuals = pd.read_csv(residuals, sep="\s+")
-    if "IID" not in df_residuals.columns:
-        df_concat = pd.concat([df_iid_fid, df_residuals], axis=1)
+    df_offsets = pd.read_csv(offsets, sep="\s+")
+    if "IID" not in df_offsets.columns:
+        df_concat = pd.concat([df_iid_fid, df_offsets], axis=1)
     else:
-        df_concat = df_residuals
+        df_concat = df_offsets
     df_concat.columns = pheno_columns
     if sample_file is not None:
         sample_file = pd.read_csv(sample_file, sep="\s+")
@@ -48,8 +50,8 @@ def preprocess_residuals(
         df_concat = pd.merge(df_concat, sample_file, on=["FID", "IID"])
         df_concat = df_concat[pheno_columns]
 
-    print(residuals + " : " + str(df_concat.shape))
-    df_concat.to_csv(residuals, sep="\t", index=None)
+    print(offsets + " : " + str(df_concat.shape))
+    df_concat.to_csv(offsets + adj_suffix, sep="\t", index=None)
 
 
 def multi_run(cmd):
@@ -122,14 +124,16 @@ def calibrate_test_stats(ldscores, bedfile, unrel_sample_list, out, pheno):
 
 def get_test_statistics(
     bedfile,
-    adjusted_traits_file,
-    residual,
+    phenofile,
+    covareffectsfile,
+    offset,
     sample_indices,
     unrel_homo_file,
     ldscores,
     covar,
     calibrate,
     out="out",
+    binary=False,
     n_workers=-1,
 ):
     if n_workers == -1:
@@ -137,48 +141,62 @@ def get_test_statistics(
 
     snp_on_disk = Bed(bedfile, count_A1=True)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
-    adjusted_traits = pd.read_csv(adjusted_traits_file, sep="\s+")
-    pheno_columns = adjusted_traits.columns.tolist()
+    traits = pd.read_csv(phenofile, sep="\s+")
+    pheno_columns = traits.columns.tolist()
     print(pheno_columns)
 
     Parallel(n_jobs=n_workers)(
-        delayed(preprocess_residuals)(
-            bedfile, residual + str(C) + ".residuals", sample_indices, pheno_columns
+        delayed(preprocess_offsets)(
+            bedfile, offset + str(C) + ".offsets", sample_indices, pheno_columns
         )
         for C in unique_chrs
     )
+    preprocess_offsets(bedfile, phenofile, sample_indices, pheno_columns)
+    preprocess_offsets(bedfile, covareffectsfile, sample_indices, pheno_columns)
 
     if calibrate:
         # Run LR-unRel using our numba implementation
         unrel_homo = pd.read_csv(unrel_homo_file, names=["FID", "IID"], sep="\s+")
-        unrel_sample_pheno = pd.merge(adjusted_traits, unrel_homo, on=["FID", "IID"])
-        unrel_sample_pheno.to_csv(out + "adjusted.unrel", sep="\t", index=None)
+        covareffects = pd.read_csv(covareffectsfile, sep="\s+")
+        unrel_sample_covareffect = pd.merge(covareffects, unrel_homo, on=["FID", "IID"])
+        if binary:
+            unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]] = expit(
+                unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]].values
+            )
+        unrel_sample_covareffect.to_csv(
+            out + ".covar_effects.unrel", sep="\t", index=None
+        )
+        unrel_sample_traits = pd.merge(traits, unrel_homo, on=["FID", "IID"])
+        unrel_sample_traits.to_csv(out + ".traits.unrel", sep="\t", index=None)
         samples_dict = {}
         for i, fid in enumerate(snp_on_disk.iid[:, 0]):
             samples_dict[int(fid)] = i
         unrel_sample_indices = []
-        for fid in unrel_sample_pheno.FID:
+        for fid in unrel_sample_covareffect.FID:
             unrel_sample_indices.append(samples_dict[int(fid)])
 
         get_unadjusted_test_statistics(
             bedfile,
-            [out + "adjusted.unrel"] * len(unique_chrs),
+            [out + ".traits.unrel"] * len(unique_chrs),
+            [out + ".covar_effects.unrel"] * len(unique_chrs),
             covar,
             out + "_lrunrel",
             unique_chrs,
             num_threads=n_workers,
+            binary=binary,
         )
-    residualFileList = [residual + str(chr) + ".residuals" for chr in unique_chrs]
+    offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
     get_unadjusted_test_statistics(
         bedfile,
-        residualFileList,
+        [phenofile] * len(unique_chrs),
+        offsetFileList,
         covar,
         out,
         unique_chrs,
         num_threads=n_workers,
+        binary=binary,
     )
     if calibrate:
-        pheno_list = pheno_columns[2:]
         if ldscores is None:
             ldscores = calc_ldscore_chip(
                 bedfile,
@@ -193,7 +211,7 @@ def get_test_statistics(
             calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out
         )
         correction = Parallel(n_jobs=min(8, n_workers))(
-            delayed(partial_calibrate_test_stats)(i) for i in pheno_list
+            delayed(partial_calibrate_test_stats)(i) for i in pheno_columns[2:]
         )
         np.savetxt(out + ".calibration", correction)
         return correction
@@ -205,13 +223,14 @@ def get_test_statistics_bgen(
     bgenfile,
     samplefile,
     bedfile,
-    adjusted_traits_file,
-    residual,
+    phenofile,
+    offset,
     sample_indices,
     covar,
     calibrationFile,
     extractFile,
     out="out",
+    binary=False,
     n_workers=-1,
 ):
     if n_workers == -1:
@@ -222,28 +241,39 @@ def get_test_statistics_bgen(
 
     snp_on_disk = Bed(bedfile, count_A1=True)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
-    pheno_columns = pd.read_csv(adjusted_traits_file, sep="\s+").columns.tolist()
-    residualFileList = [residual + str(chr) + ".residuals" for chr in unique_chrs]
+    offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
+    traits = pd.read_csv(phenofile, sep="\s+")
+    pheno_columns = traits.columns.tolist()
 
     Parallel(n_jobs=n_workers)(
-        delayed(preprocess_residuals)(
+        delayed(preprocess_offsets)(
             bedfile,
-            residual + str(C) + ".residuals",
+            offset + str(C) + ".offsets",
             sample_indices,
             pheno_columns,
             samplefile,
         )
         for C in unique_chrs
     )
+    preprocess_offsets(
+        bedfile,
+        phenofile,
+        sample_indices,
+        pheno_columns,
+        samplefile,
+        adj_suffix=".preprocessed",
+    )
     get_unadjusted_test_statistics_bgen(
         bgenfile,
         samplefile,
-        residualFileList,
+        [phenofile + ".preprocessed"] * len(unique_chrs),
+        offsetFileList,
         covar,
         out + "_bgen",
         unique_chrs,
         extractFile,
         num_threads=n_workers,
+        binary=binary,
     )
 
     if calibrationFile is not None:
@@ -258,9 +288,7 @@ def get_test_statistics_bgen(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--bed", "-g", help="prefix for bed/bim/fam files", type=str)
-    parser.add_argument(
-        "--output_step1", help="Filename of the residuals file", type=str
-    )
+    parser.add_argument("--output_step1", help="Filename of the offsets file", type=str)
     parser.add_argument(
         "--covar",
         "-c",
@@ -305,10 +333,19 @@ if __name__ == "__main__":
         default=None,
         type=str,
     )
+    parser.add_argument(
+        "--binary",
+        help="Is the phenotype binary ?",
+        action="store_const",
+        const=True,
+        default=False,
+    )
 
     args = parser.parse_args()
-    residuals_file = args.output_step1 + "loco_chr"
-    adjusted_traits_file = args.output_step1 + ".adjusted_traits.phen"
+    offsets_file = args.output_step1 + "loco_chr"
+
+    traits = args.output_step1 + ".traits"
+    covareffects = args.output_step1 + ".covar_effects"
     sample_indices = np.array(h5py.File(args.hdf5, "r")["sample_indices"])
 
     ######      Calculating test statistics       ######
@@ -317,26 +354,29 @@ if __name__ == "__main__":
     if args.bgen is None:
         get_test_statistics(
             args.bed,
-            adjusted_traits_file,
-            residuals_file,
+            traits,
+            covareffects,
+            offsets_file,
             sample_indices,
             args.unrel_sample_list,
             args.ldscores,
             args.covar,
             args.calibrate,
             args.output,
+            args.binary,
         )
     else:
         get_test_statistics_bgen(
             args.bgen,
             args.sample,
             args.bed,
-            adjusted_traits_file,
-            residuals_file,
+            traits,
+            offsets_file,
             sample_indices,
             args.covar,
             args.calibrationFile,
             args.extract,
             args.output,
+            args.binary,
         )
     print("Done in " + str(time.time() - st) + " secs")
