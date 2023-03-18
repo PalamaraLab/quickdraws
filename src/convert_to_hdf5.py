@@ -153,12 +153,19 @@ if __name__ == "__main__":
         default=None,
         type=str,
     )
+    parser.add_argument(
+        "--binary",
+        help="Is the phenotype binary ?",
+        action="store_const",
+        const=True,
+        default=False,
+    )
 
     args = parser.parse_args()
 
     if args.bed is not None and args.pheno is not None:
         Traits, covar_effects, sample_indices = preprocess_phenotypes(
-            args.pheno, args.covar, args.bed, args.removeFile
+            args.pheno, args.covar, args.bed, args.removeFile, args.binary
         )
         PreparePhenoRHE(Traits, covar_effects, args.bed, args.output, None)
 

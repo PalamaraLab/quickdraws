@@ -12,7 +12,7 @@ import pdb
 from scipy.special import expit
 
 
-def preprocess_phenotypes(pheno, covar, bed, removeFile):
+def preprocess_phenotypes(pheno, covar, bed, removeFile, binary):
     snp_on_disk = Bed(bed, count_A1=True)
     samples_geno = [int(x) for x in snp_on_disk.iid[:, 0]]
 
@@ -70,15 +70,14 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
     # assert sum(Traits.isna().sum()) == 0
 
     ## check if traits are binary and if nunique == 2 make them binary
-    if np.all(Traits.iloc[:, 2:].nunique() == 2):
+    if binary:
+        assert np.all(Traits.iloc[:, 2:].nunique() == 2)
         unique_vals = np.unique(Traits.iloc[:, 2:])
         for col in Traits.columns[2:]:
             Traits[col] = Traits[col] == unique_vals[1]
             Traits[col] = Traits[col].astype(int)
         print("Identified {0} binary traits.".format(Traits.shape[1] - 2))
-        binary = True
-    else:
-        binary = False
+
     ################ CAUTION #######################
 
     ### covariate adjustment
@@ -105,15 +104,15 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile):
         )
         for col in trait_columns:
             Trait = merged_df[col]
-            # Trait -= W.dot(np.linalg.inv(W.T.dot(W))).dot(W.T.dot(Trait))
             if not binary:
                 merged_df["covar_effect_" + str(col)] = W.dot(
                     np.linalg.inv(W.T.dot(W))
                 ).dot(W.T.dot(Trait))
             else:
-                clf = LogisticRegression(random_state=0, max_iter=5000).fit(W, Trait)
+                clf = LogisticRegression(
+                    random_state=0, max_iter=50000, fit_intercept=False
+                ).fit(W, Trait)
                 merged_df["covar_effect_" + str(col)] = (clf.coef_ @ (W.T)).flatten()
-            # merged_df[col] = (Trait - np.mean(Trait)) / np.std(Trait)
     else:
         print("\nWARNING: No covariates will be used! Are the traits already adjusted?")
         samples_to_keep = set(samples_geno).intersection(Traits.FID)
