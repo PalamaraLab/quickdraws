@@ -10,6 +10,7 @@ import argparse
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 from blr import str_to_bool
+from scipy.stats import norm
 
 
 def MakeAnnotation(bed, maf_bins, ld_score_percentiles, outfile=None):
@@ -135,6 +136,7 @@ def runRHE(
     rhemc,
     covariates=None,
     out="out",
+    binary=False,
 ):
     """
     A wrapper that prepares a file with SNP annotations (if needed), runs RHE on the background,
@@ -213,6 +215,15 @@ def runRHE(
         VC = np.array(VC[0:N_phen])  # take first N_phen rows
 
         VC = np.sum(VC[:, :-1], axis=1) / np.sum(VC, axis=1)
+
+        if binary:
+            ## transform heritability from observed scale to liability scale
+            pheno_df = pd.read_csv(pheno, sep="\s+")
+            for pheno in range(len(VC)):
+                prev = pheno_df.values[:, 2 + pheno].mean()
+                z = norm.pdf(norm.ppf(1 - prev))
+                VC[pheno] *= prev * (1 - prev) / (z**2)
+
         np.savetxt(out + ".h2", VC)
         print(
             "Variance components estimated as "

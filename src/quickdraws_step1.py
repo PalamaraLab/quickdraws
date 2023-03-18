@@ -188,7 +188,7 @@ st = time.time()
 print("Preprocessing the phenotypes..")
 pheno_covareffect = ".".join([args.output, "traits_covareffects"])
 Traits, covar_effects, sample_indices = preprocess_phenotypes(
-    args.pheno, args.covar, args.bed, args.removeFile
+    args.pheno, args.covar, args.bed, args.removeFile, args.binary
 )
 PreparePhenoRHE(Traits, covar_effects, args.bed, pheno_covareffect, None)
 print("Done in " + str(time.time() - st) + " secs")
@@ -214,6 +214,7 @@ if args.h2_file is None:
         args.rhemc,
         args.covar,
         args.output,
+        args.binary,
     )
     print("Done in " + str(time.time() - st) + " secs")
 else:
