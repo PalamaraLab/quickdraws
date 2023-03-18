@@ -173,10 +173,12 @@ class Model(nn.Module):
     def forward(self, x, offset, only_output=False, test=False, binary=False):
         num_batches = x.shape[0]
         x, reg = self.sc1(x, self.fc1, only_output, test)
-        x = x + offset
         if binary:
-            x = torch.sigmoid(x)
+            x = torch.sigmoid(x + offset)
+        else:
+            x = x + offset
         return x, reg * num_batches
+        ## caution
 
 
 ## Dataloader class - efficient access of the data:
@@ -301,6 +303,7 @@ class Trainer:
         self.never_validate = validate_every < 0
         self.chr_map = chr_map
         self.alpha = alpha
+        self.y_var = torch.std(train_dataset.output, axis=0).cuda().float() ** 2
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map)
             self.num_chr = len(self.unique_chr_map)
@@ -365,23 +368,22 @@ class Trainer:
         )
 
     ## masked BCE loss function
-    def masked_bce_loss(self, preds, labels, h2=0.5):
+    def masked_bce_loss(self, preds, labels, h2=0.5, y_var=1):
         mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
-        if type(h2) == torch.Tensor:
-            loss = self.bce_loss(preds[mask], labels[mask]) / (2 * (1 - h2[mask]))
-        else:
-            loss = self.bce_loss(preds[mask], labels[mask]) / (2 * (1 - h2))
+        loss = self.bce_loss(preds[mask], labels[mask])
+        # if type(h2) == torch.Tensor:
+        #     loss = loss / (2 * y_var[mask]*(1- h2[mask]))
+        # else:
+        #     loss = loss
+        return torch.sum(loss)
 
-        ## multiply by 2 here as we divide by 2 later
-        return 2 * torch.sum(loss)  ## reduction = sum
-
-    def masked_mse_loss(self, preds, labels, h2=0.5):
+    def masked_mse_loss(self, preds, labels, h2=0.5, y_var=1):
         mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
         sq_error = (preds[mask] - labels[mask]) ** 2  ## B x O
         if type(h2) == torch.Tensor:
-            sq_error = sq_error / (2 * (1 - h2[mask]))
+            sq_error = sq_error / (2 * y_var[mask] * (1 - h2[mask]))
         else:
-            sq_error = sq_error / (2 * (1 - h2))
+            sq_error = sq_error
         return torch.sum(sq_error)  ## reduction = sun
 
     # def masked_mse_loss(self, preds, labels, h2=0.5):
@@ -597,7 +599,7 @@ class Trainer:
                     )
                     if self.args.binary:
                         loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = (
-                            (torch.sigmoid(covar_effect[:, phen_no] + preds))
+                            torch.sigmoid(preds + covar_effect[:, phen_no])
                             .detach()
                             .cpu()
                             .numpy()
@@ -625,12 +627,13 @@ class Trainer:
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
             covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
+            y_var = self.y_var.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             mse_loss_arr = []
             reg_loss_arr = []
             total_loss_arr = []
             for model_no, model in enumerate(self.model_list):
                 preds, reg_loss = model(input, covar_effect_4x, binary=self.args.binary)
-                mse_loss = self.loss_func(preds, label_4x, h2)
+                mse_loss = self.loss_func(preds, label_4x, h2, y_var)
                 for k in range(self.args.forward_passes - 1):
                     preds, _ = model(
                         input,
@@ -638,7 +641,7 @@ class Trainer:
                         only_output=True,
                         binary=self.args.binary,
                     )
-                    mse1 = self.loss_func(preds, label_4x, h2)
+                    mse1 = self.loss_func(preds, label_4x, h2, y_var)
                     mse_loss = mse_loss + mse1
                 mse_loss = (
                     mse_loss / 2 / self.args.forward_passes
@@ -718,6 +721,7 @@ class Trainer:
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
             covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
+            y_var = self.y_var.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             for model_no, model in enumerate(self.model_list):
                 input_loco_chr = torch.hstack(
                     (
@@ -736,6 +740,7 @@ class Trainer:
                     preds,
                     label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
                     h2[:, :, self.pheno_for_model[model_no // self.num_chr]],
+                    y_var[:, :, self.pheno_for_model[model_no // self.num_chr]],
                 )
                 loss = 0.5 * mse_loss + reg_loss
 
@@ -867,7 +872,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     print("Done loading in: " + str(time.time() - start_time) + " secs")
     # Define model and enable wandb live policy
     std_genotype = torch.as_tensor(train_dataset.std_genotype).float()
-    std_y = torch.std(train_dataset.output - train_dataset.covar_effect, axis=0).float()
+    std_y = torch.std(train_dataset.output, axis=0).float()
     h2 = torch.as_tensor(h2).float()
 
     model_list = initialize_model(
@@ -891,7 +896,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=-1,
+        validate_every=3,
     )
     ##caution!!
     for epoch in tqdm(range(30)):
@@ -990,9 +995,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     std_genotype = torch.as_tensor(
         full_dataset.std_genotype, dtype=torch.float32
     )  # .to(device)
-    std_y = torch.std(
-        full_dataset.output - full_dataset.covar_effect, axis=0
-    )  # .to(device)
+    std_y = torch.std(full_dataset.output, axis=0)  # .to(device)
     h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
     chr_map = full_dataset.chr  # .to(device)
     model_list = initialize_model(
