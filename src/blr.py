@@ -303,7 +303,6 @@ class Trainer:
         self.never_validate = validate_every < 0
         self.chr_map = chr_map
         self.alpha = alpha
-        self.y_var = torch.std(train_dataset.output, axis=0).cuda().float() ** 2
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map)
             self.num_chr = len(self.unique_chr_map)
@@ -368,20 +367,16 @@ class Trainer:
         )
 
     ## masked BCE loss function
-    def masked_bce_loss(self, preds, labels, h2=0.5, y_var=1):
+    def masked_bce_loss(self, preds, labels, h2=0.5):
         mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
         loss = self.bce_loss(preds[mask], labels[mask])
-        # if type(h2) == torch.Tensor:
-        #     loss = loss / (2 * y_var[mask]*(1- h2[mask]))
-        # else:
-        #     loss = loss
         return torch.sum(loss)
 
-    def masked_mse_loss(self, preds, labels, h2=0.5, y_var=1):
+    def masked_mse_loss(self, preds, labels, h2=0.5):
         mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
         sq_error = (preds[mask] - labels[mask]) ** 2  ## B x O
         if type(h2) == torch.Tensor:
-            sq_error = sq_error / (2 * y_var[mask] * (1 - h2[mask]))
+            sq_error = sq_error / (2 * (1 - h2[mask]))
         else:
             sq_error = sq_error
         return torch.sum(sq_error)  ## reduction = sun
@@ -627,13 +622,12 @@ class Trainer:
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
             covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
-            y_var = self.y_var.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             mse_loss_arr = []
             reg_loss_arr = []
             total_loss_arr = []
             for model_no, model in enumerate(self.model_list):
                 preds, reg_loss = model(input, covar_effect_4x, binary=self.args.binary)
-                mse_loss = self.loss_func(preds, label_4x, h2, y_var)
+                mse_loss = self.loss_func(preds, label_4x, h2)
                 for k in range(self.args.forward_passes - 1):
                     preds, _ = model(
                         input,
@@ -641,7 +635,7 @@ class Trainer:
                         only_output=True,
                         binary=self.args.binary,
                     )
-                    mse1 = self.loss_func(preds, label_4x, h2, y_var)
+                    mse1 = self.loss_func(preds, label_4x, h2)
                     mse_loss = mse_loss + mse1
                 mse_loss = (
                     mse_loss / 2 / self.args.forward_passes
@@ -721,7 +715,6 @@ class Trainer:
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
             covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
-            y_var = self.y_var.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             for model_no, model in enumerate(self.model_list):
                 input_loco_chr = torch.hstack(
                     (
@@ -740,7 +733,6 @@ class Trainer:
                     preds,
                     label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
                     h2[:, :, self.pheno_for_model[model_no // self.num_chr]],
-                    y_var[:, :, self.pheno_for_model[model_no // self.num_chr]],
                 )
                 loss = 0.5 * mse_loss + reg_loss
 

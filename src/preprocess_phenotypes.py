@@ -78,6 +78,12 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile, binary):
             Traits[col] = Traits[col].astype(int)
         print("Identified {0} binary traits.".format(Traits.shape[1] - 2))
 
+    ## standardize the traits
+    else:
+        for col in Traits.columns[2:]:
+            Traits[col] = (Traits[col] - Traits[col].mean()) / Traits[col].std()
+        print("Identified {0} continuous traits.".format(Traits.shape[1] - 2))
+
     ################ CAUTION #######################
 
     ### covariate adjustment
