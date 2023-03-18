@@ -8,6 +8,9 @@ import numba
 import copy
 import time
 import pdb
+from firth_logistic import firth_logit_covars, firth_logit_svt
+from scipy.special import logit
+from joblib import Parallel, delayed
 
 
 def preprocess_covars(covarFile, iid_fid):
@@ -119,8 +122,74 @@ def MyLinRegr(X, Y, W, offset):
     for pheno in numba.prange(Y.shape[1]):
         var_y = Y[:, pheno].dot(y_hat[:, pheno])
         beta[pheno] = numerators[:, pheno] / var_X
-        chisq[pheno] = (N - 2) / (var_y * var_X / numerators[:, pheno] ** 2 - 1)
+        chisq[pheno] = (N - W.shape[1]) / (var_y * var_X / numerators[:, pheno] ** 2)
     return beta, chisq, afreq
+
+
+@numba.jit(nopython=True, parallel=True)
+def MyLogRegr(X, Y, W, offset):
+    """
+    Author: Hrushi
+    DIY Logistic regression with covariates and low memory footprint.
+    X should be NxM, for sufficiently large M (e.g. one chromosome), and mean centered
+    Y is multi-phenotype but should also be mean centered.
+    W needs to be a NxC array with covariates including ones (the constant).
+    offset is a NxP array with the offset for each phenotype
+    Returns a DataFrame with estimated effect sizes, Chi-Sqr statistics, and p-values
+    """
+
+    ## Preprocess genotype first
+    afreq = np.zeros(X.shape[1])
+    for snp in numba.prange(X.shape[1]):
+        isnan_at_snp = np.isnan(X[:, snp])
+        freq = np.nansum(X[:, snp]) / np.sum(~isnan_at_snp)
+        X[:, snp][isnan_at_snp] = 0
+        X[:, snp][~isnan_at_snp] -= freq
+        afreq[snp] = freq / 2
+
+    N, M = X.shape
+    beta, chisq = np.zeros((Y.shape[1], M)), np.zeros((Y.shape[1], M))
+    K = np.linalg.inv(W.T.dot(W))
+    Y1 = Y - offset
+    y_hat = Y1 - W.dot(K.dot(W.T.dot(Y1)))
+    offset = Y - y_hat
+    Tau = offset * (1 - offset)
+    for pheno in numba.prange(Y.shape[1]):
+        g_hat = X - (
+            W
+            @ (
+                np.linalg.inv((W.T * Tau[:, pheno]) @ W)
+                @ (W.T @ (X.T * Tau[:, pheno]).T)
+            )
+        )
+        numerators = g_hat.T @ (y_hat[:, pheno])
+        denominator = np.array(
+            [g_hat[:, v].dot(g_hat[:, v] * Tau[:, pheno]) for v in range(M)]
+        )
+        chisq[pheno] = numerators**2 / denominator
+        ##beta for logistic regression
+        beta[pheno] = numerators / denominator
+    return beta, chisq, afreq
+
+
+def firth_parallel(chisq_snp, beta_snp, geno_snp, Y, pred_covars, covars):
+    chisq_out = chisq_snp.copy()
+    beta_out = beta_snp.copy()
+    pheno_mask = chi2.sf(chisq_snp, df=1) < 0.1  ### caution
+    beta_firth, se, loglike_diff, iters = firth_logit_svt(
+        geno_snp, Y[:, pheno_mask], pred_covars[:, pheno_mask], covars
+    )
+    chisq_out[pheno_mask] = 2 * loglike_diff
+    beta_out[pheno_mask] = beta_firth
+    return chisq_out, beta_out
+
+
+def firth_null_parallel(offsetFile, Y, covar_effects, covars):
+    offset = pd.read_csv(offsetFile, sep="\s+")
+    offset = offset[offset.columns[2:]].values.astype("float32")
+    random_effects = logit(offset) - covar_effects
+    pred_covars, _, _ = firth_logit_covars(covars, Y, random_effects)
+    return pred_covars
 
 
 def get_unadjusted_test_statistics(
@@ -131,8 +200,9 @@ def get_unadjusted_test_statistics(
     out,
     unique_chrs,
     num_threads=-1,
-    max_memory=7500,
+    max_memory=1000,
     binary=False,
+    firth=False,
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -162,6 +232,20 @@ def get_unadjusted_test_statistics(
 
     print("Running linear/logistic regression to get association")
 
+    covar_effects = pd.read_csv(
+        phenoFileList[0].split(".traits")[0] + ".covar_effects", sep="\s+"
+    )
+    covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
+    pheno = pd.read_csv(phenoFileList[0], sep="\s+")
+    Y = pheno[pheno.columns[2:]].values.astype("float32")
+
+    if binary and firth:
+        pred_covars_arr = Parallel(n_jobs=num_threads)(
+            delayed(firth_null_parallel)(
+                offsetFileList[chr_no], Y, covar_effects, covars
+            )
+            for chr_no in range(len(np.unique(chr_map)))
+        )
     prev = 0
     for chr_no, chr in enumerate(np.unique(chr_map)):
         ## read offset file and adjust phenotype file
@@ -169,11 +253,10 @@ def get_unadjusted_test_statistics(
         pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
         offset = offset[offset.columns[2:]].values.astype("float32")
         Y = pheno[pheno.columns[2:]].values.astype("float32")
-        Y -= np.mean(Y, axis=0)
-        offset -= np.mean(offset, axis=0)
-
+        # Y -= np.mean(Y, axis=0)
+        # offset -= np.mean(offset, axis=0)
         num_snps_in_chr = int(np.sum(chr_map == int(chr)))
-        for batch in range(0, num_snps_in_chr, batch_size):
+        for batch in tqdm(range(0, num_snps_in_chr, batch_size)):
 
             ## read genotype and calculate Alt allele freq
             X = (
@@ -183,11 +266,11 @@ def get_unadjusted_test_statistics(
                 .read(dtype="float32", num_threads=num_threads)
                 .val
             )
-
             ## preprocess genotype and perform linear regression
-            if binary is False:
+            if binary:
+                beta, chisq, afreq = MyLogRegr(X, Y, covars, offset)
+            else:
                 beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
-
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
             ] = beta
@@ -197,6 +280,25 @@ def get_unadjusted_test_statistics(
             afreq_arr[
                 prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
             ] = afreq
+            if binary and firth:
+                par_out = Parallel(n_jobs=num_threads)(
+                    delayed(firth_parallel)(
+                        chisq[:, snp],
+                        beta[:, snp],
+                        X[:, snp : snp + 1],
+                        Y,
+                        pred_covars_arr[chr_no],
+                        covars,
+                    )
+                    for snp in range(0, chisq.shape[1])
+                )
+                par_out = np.array(par_out)
+                chisq_arr[
+                    :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
+                ] = par_out[:, 0].T
+                beta_arr[
+                    :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
+                ] = par_out[:, 1].T
 
         prev += num_snps_in_chr
 
@@ -224,6 +326,7 @@ def get_unadjusted_test_statistics_bgen(
     max_memory=7500,
     binary=False,
 ):
+    raise NotImplementedError("This function is not implemented yet")
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
 
@@ -313,7 +416,9 @@ def get_unadjusted_test_statistics_bgen(
             print("1: " + str(time.time() - st))
             st = time.time()
             ## preprocess genotype and perform linear regression
-            if binary is False:
+            if binary:
+                beta, chisq, afreq = MyLogRegr(X, Y, covars, offset)
+            else:
                 beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
 
             beta_arr[
