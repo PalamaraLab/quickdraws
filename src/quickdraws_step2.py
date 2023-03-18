@@ -17,6 +17,7 @@ import h5py
 import time
 from joblib import Parallel, delayed
 from scipy.special import expit
+import warnings
 
 from ldscore_calibration import calc_ldscore_chip, ldscore_intercept, get_mask_dodgy
 from custom_linear_regression import (
@@ -134,6 +135,7 @@ def get_test_statistics(
     calibrate,
     out="out",
     binary=False,
+    firth=False,
     n_workers=-1,
 ):
     if n_workers == -1:
@@ -164,10 +166,10 @@ def get_test_statistics(
                 unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]].values
             )
         unrel_sample_covareffect.to_csv(
-            out + ".covar_effects.unrel", sep="\t", index=None
+            out + ".unrel.covar_effects", sep="\t", index=None
         )
         unrel_sample_traits = pd.merge(traits, unrel_homo, on=["FID", "IID"])
-        unrel_sample_traits.to_csv(out + ".traits.unrel", sep="\t", index=None)
+        unrel_sample_traits.to_csv(out + ".unrel.traits", sep="\t", index=None)
         samples_dict = {}
         for i, fid in enumerate(snp_on_disk.iid[:, 0]):
             samples_dict[int(fid)] = i
@@ -177,13 +179,14 @@ def get_test_statistics(
 
         get_unadjusted_test_statistics(
             bedfile,
-            [out + ".traits.unrel"] * len(unique_chrs),
-            [out + ".covar_effects.unrel"] * len(unique_chrs),
+            [out + ".unrel.traits"] * len(unique_chrs),
+            [out + ".unrel.covar_effects"] * len(unique_chrs),
             covar,
             out + "_lrunrel",
             unique_chrs,
             num_threads=n_workers,
             binary=binary,
+            firth=firth,
         )
     offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
     get_unadjusted_test_statistics(
@@ -195,9 +198,13 @@ def get_test_statistics(
         unique_chrs,
         num_threads=n_workers,
         binary=binary,
+        firth=firth,
     )
     if calibrate:
         if ldscores is None:
+            warnings.warn(
+                "No LD scores provided, using LD score chip.. this might lead to error-prone power"
+            )
             ldscores = calc_ldscore_chip(
                 bedfile,
                 np.ones(snp_on_disk.shape[1], dtype="bool"),
@@ -214,9 +221,10 @@ def get_test_statistics(
             delayed(partial_calibrate_test_stats)(i) for i in pheno_columns[2:]
         )
         np.savetxt(out + ".calibration", correction)
-        return correction
     else:
-        return None
+        correction = None
+
+    return correction
 
 
 def get_test_statistics_bgen(
@@ -340,6 +348,13 @@ if __name__ == "__main__":
         const=True,
         default=False,
     )
+    parser.add_argument(
+        "--firth",
+        help="Approximate firth logistic regression ?",
+        action="store_const",
+        const=True,
+        default=False,
+    )
 
     args = parser.parse_args()
     offsets_file = args.output_step1 + "loco_chr"
@@ -364,6 +379,7 @@ if __name__ == "__main__":
             args.calibrate,
             args.output,
             args.binary,
+            args.firth,
         )
     else:
         get_test_statistics_bgen(
