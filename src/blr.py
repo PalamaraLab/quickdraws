@@ -194,7 +194,7 @@ class HDF5Dataset:
         train_split=0.8,
     ):
         ### Assumes the HDF5 dataset is already randomly shuffled
-        ### Assumes the HDF5 dataset has mean_genotype and std_genotype computed
+        ### Assumes the HDF5 dataset has genotype_covar_effect and std_genotype computed
 
         if split not in ["train", "test", "both"]:
             raise ValueError("Invalid value for split argument")
@@ -245,10 +245,11 @@ class HDF5Dataset:
 
         # self.output = self.output[:, 1:6]  ##fixing it to only 1st phenotype
         self.std_genotype = np.maximum(np.array(h5py_file["std_genotype"]), 1e-6)
-        self.mean_genotype = torch.as_tensor(
-            np.array(h5py_file["mean_genotype"])
+        self.geno_covar_effect = torch.as_tensor(
+            np.array(h5py_file["geno_covar_effect"])
         ).float()
-        self.num_snps = len(self.mean_genotype)
+        self.covars = torch.as_tensor(np.array(h5py_file["covars"])).float()
+        self.num_snps = len(self.std_genotype)
         self.chr = torch.as_tensor(np.array(h5py_file["chr"])).float()
         ### Using the mean and std genotype calculated on entire dataset, doesn't change the results
         self.length = len(self.output)
@@ -262,7 +263,7 @@ class HDF5Dataset:
             torch.as_tensor(np.unpackbits(self.hap1[index])).float()
             + torch.as_tensor(np.unpackbits(self.hap2[index])).float()
         )
-        input = input[0 : self.num_snps] - self.mean_genotype
+        input = input[0 : self.num_snps] - self.covars[index] @ self.geno_covar_effect
         output = self.output[index]
         covar_effect = self.covar_effect[index]
         if self.transform is not None:

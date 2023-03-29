@@ -259,7 +259,7 @@ def get_unadjusted_test_statistics(
         for batch in tqdm(range(0, num_snps_in_chr, batch_size)):
 
             ## read genotype and calculate Alt allele freq
-            X = (
+            X = 2 - (
                 snp_on_disk[
                     :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
                 ]
@@ -406,7 +406,7 @@ def get_unadjusted_test_statistics_bgen(
 
             ## read genotype and calculate Alt allele freq
             st = time.time()
-            X = (
+            X = 2 - (
                 snp_on_disk[
                     :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
                 ]

@@ -7,12 +7,53 @@ import numpy.ma as ma
 from tqdm import tqdm
 import argparse
 from pysnptools.distreader import Bgen
+import pdb
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
+
+## get covariate effect on genotypes and std_genotype
+def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096):
+    snp_on_disk = Bed(bed, count_A1=True)
+    snp_on_disk = snp_on_disk[sample_indices, snp_mask]
+    chunk_size = min(chunk_size, snp_on_disk.shape[1])
+    df_covar = pd.read_csv(covars, sep="\s+")
+    df_covar = pd.merge(
+        pd.DataFrame(snp_on_disk.iid[:, 0].astype("int"), columns=["FID"]),
+        df_covar,
+        on=["FID"],
+    )
+    df_covar["ALL_CONST"] = 1
+    covars = df_covar[df_covar.columns[2:]].values
+    K = np.linalg.inv(covars.T @ covars)
+    geno_covar_effect = np.zeros((covars.shape[1], snp_on_disk.shape[1]))
+    xtx = np.zeros(snp_on_disk.shape[1])
+    for i in tqdm(range(0, snp_on_disk.shape[1], chunk_size)):
+        x = 2 - (
+            snp_on_disk[:, i : min(i + chunk_size, snp_on_disk.shape[1])]
+            .read(dtype="int8", _require_float32_64=False)
+            .val
+        )
+        x = np.array(x, dtype="float32")
+        x[x < 0] = np.nan
+        x = np.where(
+            np.isnan(x),
+            np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
+            x,
+        )
+        temp = covars.T.dot(x)
+        geno_covar_effect[:, i : min(i + chunk_size, snp_on_disk.shape[1])] = K @ temp
+        xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] = np.array(
+            [
+                x[:, v].dot(x[:, v]) - temp[:, v].dot(K.dot(temp[:, v]))
+                for v in range(x.shape[1])
+            ]
+        )
+    return covars, geno_covar_effect, np.sqrt(xtx / len(sample_indices))
 
 
 def convert_to_hdf5(
     bed,
+    covars,
     sample_indices,
     out="out",
     snps_to_keep_filename=None,
@@ -45,6 +86,10 @@ def convert_to_hdf5(
         for snp in snps_to_keep:
             snp_mask[snp_dict[snp]] = True
 
+    covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
+        bed, sample_indices, covars, snp_mask, chunk_size=4096
+    )
+
     # save the chromosome information
     _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
 
@@ -72,12 +117,13 @@ def convert_to_hdf5(
     )
     dset3 = h1.create_dataset("phenotype", data=y, dtype=float)
     dset35 = h1.create_dataset("covar_effect", data=z, dtype=float)
-    dset4 = h1.create_dataset("mean_genotype", (total_snps,), dtype=float)
-    dset5 = h1.create_dataset("std_genotype", (total_snps,), dtype=float)
+    dset4 = h1.create_dataset("geno_covar_effect", data=geno_covar_effect, dtype=float)
+    dset5 = h1.create_dataset("std_genotype", data=std_genotype, dtype=float)
+    dset55 = h1.create_dataset("covars", data=covars_arr, dtype=float)
     dset6 = h1.create_dataset("sample_indices", data=sample_indices, dtype=int)
 
-    sum_genotype = np.zeros(total_snps)
-    sum_square_genotype = np.zeros(total_snps)
+    # sum_genotype = np.zeros(total_snps)
+    # sum_square_genotype = np.zeros(total_snps)
     for i in tqdm(range(0, total_samples, chunk_size)):
         x = 2 - (
             snp_on_disk[
@@ -93,16 +139,16 @@ def convert_to_hdf5(
             np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
             x,
         )
-        sum_genotype += np.sum(x, axis=0)
-        sum_square_genotype += np.sum(x**2, axis=0)
+        # sum_genotype += np.sum(x, axis=0)
+        # sum_square_genotype += np.sum(x**2, axis=0)
         dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
         dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
         ## np.packbits() requires most time (~ 80%)
 
-    dset4[:] = sum_genotype / total_samples
-    dset5[:] = np.sqrt(
-        sum_square_genotype / total_samples - (sum_genotype / total_samples) ** 2
-    )
+    # dset4[:] = sum_genotype / total_samples
+    # dset5[:] = np.sqrt(
+    #     sum_square_genotype / total_samples - (sum_genotype / total_samples) ** 2
+    # )
     h1.close()
     return out + ".hdf5"
 
@@ -170,7 +216,7 @@ if __name__ == "__main__":
         PreparePhenoRHE(Traits, covar_effects, args.bed, args.output, None)
 
         filename = convert_to_hdf5(
-            args.bed, sample_indices, args.output, args.modelSnps
+            args.bed, args.covar, sample_indices, args.output, args.modelSnps
         )
     if args.bgen is not None and args.sample is not None:
         load_bgen_tempfiles(args)

@@ -226,7 +226,11 @@ if args.hdf5 is None:
     st = time.time()
     print("Converting Bed file to HDF5..")
     hdf5_filename = convert_to_hdf5(
-        args.bed, pheno_covareffect, sample_indices, args.output, args.modelSnps
+        args.bed,
+        args.covar,
+        sample_indices,
+        args.output,
+        args.modelSnps,
     )
     print("Done in " + str(time.time() - st) + " secs")
 else:
