@@ -88,9 +88,15 @@ parser.add_argument(
     default="src/RHEmcmt",
     help="path to RHE-MC / SCORE binary file",
 )
-parser.add_argument("--hdf5", type=str, help="File name of the hdf5 file to use")
+parser.add_argument("--output_step0", help="prefix of the hdf5 file", type=str)
 parser.add_argument("--h2_file", type=str, help="File containing estimated h2")
-
+parser.add_argument(
+    "--h2_grid",
+    help="grid search for h2 instead",
+    action="store_const",
+    const=True,
+    default=False,
+)
 ## hyperparameters arguments
 parser.add_argument(
     "--num_epochs", help="number of epochs to train for", type=int, default=10
@@ -185,16 +191,19 @@ assert (args.calibrate and args.unrel_sample_list is not None) or (not args.cali
 
 ######      Preprocessing the phenotypes      ######
 st = time.time()
-print("Preprocessing the phenotypes..")
-pheno_covareffect = ".".join([args.output, "traits_covareffects"])
-Traits, covar_effects, sample_indices = preprocess_phenotypes(
-    args.pheno, args.covar, args.bed, args.removeFile, args.binary
-)
-PreparePhenoRHE(Traits, covar_effects, args.bed, pheno_covareffect, None)
-print("Done in " + str(time.time() - st) + " secs")
+if args.output_step0 is not None:
+    rhe_output = args.output_step0
+else:
+    print("Preprocessing the phenotypes..")
+    rhe_output = args.output
+    Traits, covar_effects, sample_indices = preprocess_phenotypes(
+        args.pheno, args.covar, args.bed, args.removeFile, args.binary
+    )
+    PreparePhenoRHE(Traits, covar_effects, args.bed, rhe_output, None)
+    print("Done in " + str(time.time() - st) + " secs")
 
 ######      Run RHE-MC for h2 estimation      ######
-if args.h2_file is None:
+if args.h2_file is None and not args.h2_grid:
     st = time.time()
     print("Calculating heritability estimates using RHE..")
     if args.make_annot:
@@ -207,7 +216,7 @@ if args.h2_file is None:
         )
     VC = runRHE(
         args.bed,
-        pheno_covareffect + ".rhe",
+        rhe_output + ".rhe",
         args.modelSnps,
         args.annot,
         args.output + ".rhe.log",
@@ -217,12 +226,14 @@ if args.h2_file is None:
         args.binary,
     )
     print("Done in " + str(time.time() - st) + " secs")
-else:
+elif args.h2_file is not None:
     print("Loading heritability estimates from: " + str(args.h2_file))
     VC = np.loadtxt(args.h2_file)
+else:
+    VC = None
 
 ######      Converting .bed to .hdf5          ######
-if args.hdf5 is None:
+if args.output_step0 is None:
     st = time.time()
     print("Converting Bed file to HDF5..")
     hdf5_filename = convert_to_hdf5(
@@ -234,8 +245,8 @@ if args.hdf5 is None:
     )
     print("Done in " + str(time.time() - st) + " secs")
 else:
-    print("Loading HDF5 file from: " + str(args.hdf5))
-    hdf5_filename = args.hdf5
+    print("Loading HDF5 file from: " + str(args.output_step0) + ".hdf5")
+    hdf5_filename = args.output_step0 + ".hdf5"
     sample_indices = np.array(h5py.File(hdf5_filename, "r")["sample_indices"])
 
 ######      Running variational inference     ######

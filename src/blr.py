@@ -815,10 +815,14 @@ def initialize_model(
                     posterior_sig=posterior_sig[dim_out == alpha_no][
                         :, chr_map != chr
                     ].to(device),
-                    mu=mu[dim_out == alpha_no][:, chr_map != chr].to(device)
+                    mu=torch.as_tensor(mu[dim_out == alpha_no][:, chr_map != chr])
+                    .float()
+                    .to(device)
                     if mu is not None
                     else None,
-                    spike=spike[dim_out == alpha_no][:, chr_map != chr].to(device)
+                    spike=torch.as_tensor(spike[dim_out == alpha_no][:, chr_map != chr])
+                    .float()
+                    .to(device)
                     if spike is not None
                     else None,
                 )
@@ -852,6 +856,8 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
         train_split=args.train_split,
     )
     dim_out = train_dataset.output.shape[1]
+    if np.ndim(h2) == 0:
+        h2 = np.array([h2] * dim_out)
     assert len(h2) == dim_out
     if len(args.lr) != len(alpha) and len(args.lr) == 1:
         args.lr = args.lr * len(alpha)
@@ -913,13 +919,30 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
     print("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
     print("Best MSE across all alpha values: " + str(np.max(output_loss, axis=1)))
 
-    best_alpha = np.argmax(output_r2, axis=1)
-    mu_list = torch.zeros((dim_out, len(std_genotype)))
-    spike_list = torch.zeros((dim_out, len(std_genotype)))
+    best_alpha = (
+        np.argmax(output_r2, axis=1)
+        if not args.binary
+        else np.argmax(output_loss, axis=1)
+    )
+    mu_list = np.zeros((dim_out, len(std_genotype)))
+    spike_list = np.zeros((dim_out, len(std_genotype)))
     for prs_no in range(dim_out):
-        mu = trainer.model_list[best_alpha[prs_no]].fc1.weight[prs_no]
-        spike = torch.clamp(
-            trainer.model_list[best_alpha[prs_no]].sc1.spike1[prs_no], 1e-6, 1.0 - 1e-6
+        mu = (
+            trainer.model_list[best_alpha[prs_no]]
+            .fc1.weight[prs_no]
+            .cpu()
+            .detach()
+            .numpy()
+        )
+        spike = (
+            torch.clamp(
+                trainer.model_list[best_alpha[prs_no]].sc1.spike1[prs_no],
+                1e-6,
+                1.0 - 1e-6,
+            )
+            .cpu()
+            .detach()
+            .numpy()
         )
         mu_list[prs_no] = mu
         spike_list[prs_no] = spike
@@ -957,21 +980,45 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## hard-coding alpha values as in BOLT
     alpha = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
-    output_r2, mu, spike = hyperparam_search(
-        args, alpha, h2, hdf5_filename, device=device
-    )
+    if args.h2_grid:
+        output_r2, mu, spike = [], [], []
+        h2_grid = np.array([0.01, 0.25, 0.5, 0.75, 0.9])
+        for h2_i in h2_grid:
+            output_r2_i, mu_i, spike_i = hyperparam_search(
+                args, alpha, h2_i, hdf5_filename, device=device
+            )
+            output_r2.append(output_r2_i)
+            mu.append(mu_i)
+            spike.append(spike_i)
+        output_r2 = np.array(output_r2)
+        mu = np.array(mu)
+        spike = np.array(spike)
+    else:
+        output_r2, mu, spike = hyperparam_search(
+            args, alpha, h2, hdf5_filename, device=device
+        )
+
     ### 🌵
     # device = "cuda"
     # output_r2, mu, spike = np.zeros((len(h2), len(alpha))), None, None
     with torch.no_grad():
         torch.cuda.empty_cache()
 
-    ## Only run for best alpha's
+    if args.h2_grid:
+        output_r2_best_alpha = np.max(output_r2, axis=2)
+        h2 = h2_grid[np.argmax(output_r2_best_alpha, axis=0)]
+        print("Heritability estimated through grid search: " + str(h2))
+        output_r2 = np.max(output_r2, axis=0)
+        mu = mu[np.argmax(output_r2_best_alpha, axis=0)[0]]
+        spike = spike[np.argmax(output_r2_best_alpha, axis=0)[0]]
+
     alpha = np.array(alpha)[np.unique(np.argmax(output_r2, axis=1))]
+
     output_r2_subset = output_r2[:, np.unique(np.argmax(output_r2, axis=1))]
     pheno_for_model = []
     for j in range(len(alpha)):
         pheno_for_model.append(np.argmax(output_r2_subset, axis=1) == j)
+
     ## output_loss_subset.shape = number of phenotypes x len(best_alpha)
     print("Training on entire data with best alphas: " + str(alpha))
 
