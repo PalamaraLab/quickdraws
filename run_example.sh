@@ -20,9 +20,10 @@ python src/quickdraws_step1.py \
     --output output/qd \
     --bed ${bed} \
     --pheno ${pheno} \
-    --hdf5 output/qd.hdf5 \
+    --output_step0 output/qd \
     --covar ${covar} \
-    --unrel_sample_list example/unrelated_FID_IID.txt 
+    --unrel_sample_list example/unrelated_FID_IID.txt \
+    --h2_grid
 
 ## step 2: get association stats for SNPs in bgen file
 python src/quickdraws_step2.py \
