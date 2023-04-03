@@ -82,7 +82,9 @@ def adjust_test_stats(out, pheno, correction):
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
 
 
-def calibrate_test_stats(ldscores, bedfile, unrel_sample_list, out, pheno):
+def calibrate_test_stats(
+    ldscores, bedfile, unrel_sample_list, out, match_yinter, pheno
+):
     sumstats_ref = pd.read_hdf(
         "{0}.{1}.sumstats".format(out + "_lrunrel", pheno), key="sumstats"
     )
@@ -106,9 +108,12 @@ def calibrate_test_stats(ldscores, bedfile, unrel_sample_list, out, pheno):
     correction = (1 - atten_ratio_ref) / (
         intercept_cur - atten_ratio_ref * mean_sumstats_cur
     )
-    # correction = intercept_ref / intercept_cur
+    if match_yinter:
+        correction = intercept_ref / intercept_cur
 
     sumstats_cur["CHISQ"] *= correction
+    if mean_sumstats_cur <= 1 and match_yinter:
+        sumstats_cur["CHISQ"] = sumstats_ref["CHISQ"]
     sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
@@ -136,6 +141,7 @@ def get_test_statistics(
     out="out",
     binary=False,
     firth=False,
+    firth_pval_thresh=0.05,
     n_workers=-1,
 ):
     if n_workers == -1:
@@ -160,7 +166,11 @@ def get_test_statistics(
         # Run LR-unRel using our numba implementation
         unrel_homo = pd.read_csv(unrel_homo_file, names=["FID", "IID"], sep="\s+")
         covareffects = pd.read_csv(covareffectsfile, sep="\s+")
-        unrel_sample_covareffect = pd.merge(covareffects, unrel_homo, on=["FID", "IID"])
+        unrel_sample_covareffect = (
+            covareffects
+            if binary
+            else pd.merge(covareffects, unrel_homo, on=["FID", "IID"])
+        )
         if binary:
             unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]] = expit(
                 unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]].values
@@ -168,7 +178,9 @@ def get_test_statistics(
         unrel_sample_covareffect.to_csv(
             out + ".unrel.covar_effects", sep="\t", index=None
         )
-        unrel_sample_traits = pd.merge(traits, unrel_homo, on=["FID", "IID"])
+        unrel_sample_traits = (
+            traits if binary else pd.merge(traits, unrel_homo, on=["FID", "IID"])
+        )
         unrel_sample_traits.to_csv(out + ".unrel.traits", sep="\t", index=None)
         samples_dict = {}
         for i, fid in enumerate(snp_on_disk.iid[:, 0]):
@@ -187,6 +199,7 @@ def get_test_statistics(
             num_threads=n_workers,
             binary=binary,
             firth=firth,
+            firth_pval_thresh=firth_pval_thresh,
         )
     offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
     get_unadjusted_test_statistics(
@@ -199,7 +212,9 @@ def get_test_statistics(
         num_threads=n_workers,
         binary=binary,
         firth=firth,
+        firth_pval_thresh=firth_pval_thresh,
     )
+
     if calibrate:
         if ldscores is None:
             warnings.warn(
@@ -215,7 +230,7 @@ def get_test_statistics(
             ldscores = pd.read_csv(ldscores, sep="\s+")
 
         partial_calibrate_test_stats = partial(
-            calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out
+            calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out, binary
         )
         correction = Parallel(n_jobs=min(8, n_workers))(
             delayed(partial_calibrate_test_stats)(i) for i in pheno_columns[2:]
@@ -355,6 +370,12 @@ if __name__ == "__main__":
         const=True,
         default=False,
     )
+    parser.add_argument(
+        "--firth_pval_thresh",
+        help="P-value threshold below which firth logistic regression done",
+        type=float,
+        default=0.05,
+    )
 
     args = parser.parse_args()
     offsets_file = args.output_step1 + "loco_chr"
@@ -380,6 +401,7 @@ if __name__ == "__main__":
             args.output,
             args.binary,
             args.firth,
+            args.firth_pval_thresh,
         )
     else:
         get_test_statistics_bgen(
