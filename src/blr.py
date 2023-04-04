@@ -895,7 +895,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=3,
+        validate_every=-1,
     )
     ##caution!!
     for epoch in tqdm(range(30)):
@@ -1069,7 +1069,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=1,
+        validate_every=-1,
         chr_map=chr_map.to(device),
         pheno_for_model=pheno_for_model,
     )
