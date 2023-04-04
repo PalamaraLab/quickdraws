@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from joblib import Parallel, delayed
 
-# import bitsandbytes as bnb
+import bitsandbytes as bnb
 import gc
 import pdb
 
@@ -324,7 +324,7 @@ class Trainer:
         self.optimizer_list = []
         for model_no, model in enumerate(model_list):
             self.optimizer_list.append(
-                torch.optim.Adam(
+                bnb.optim.Adam(
                     model.parameters(),
                     lr=lr[model_no // self.num_chr]
                     if len(lr) != len(model_list)
@@ -332,7 +332,7 @@ class Trainer:
                     eps=adam_eps,
                     weight_decay=weight_decay,
                     betas=(0.9, 0.995),
-                    # optim_bits=8,
+                    optim_bits=8,
                 )
             )
         if self.args.cosine_scheduler:
