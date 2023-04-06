@@ -254,6 +254,8 @@ def get_test_statistics_bgen(
     extractFile,
     out="out",
     binary=False,
+    firth=False,
+    firth_pval_thresh=0.05,
     n_workers=-1,
 ):
     if n_workers == -1:
@@ -297,6 +299,8 @@ def get_test_statistics_bgen(
         extractFile,
         num_threads=n_workers,
         binary=binary,
+        firth=firth,
+        firth_pval_thresh=firth_pval_thresh,
     )
 
     if calibrationFile is not None:
@@ -416,5 +420,7 @@ if __name__ == "__main__":
             args.extract,
             args.output,
             args.binary,
+            args.firth,
+            args.firth_pval_thresh,
         )
     print("Done in " + str(time.time() - st) + " secs")
