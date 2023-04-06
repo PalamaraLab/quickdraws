@@ -149,22 +149,17 @@ def MyLogRegr(X, Y, W, offset):
 
     N, M = X.shape
     beta, chisq = np.zeros((Y.shape[1], M)), np.zeros((Y.shape[1], M))
-    K = np.linalg.inv(W.T.dot(W))
-    Y1 = Y - offset
-    y_hat = Y1 - W.dot(K.dot(W.T.dot(Y1)))
-    offset = Y - y_hat
+    y_hat = Y - offset
     Tau = offset * (1 - offset)
     for pheno in numba.prange(Y.shape[1]):
-        g_hat = X - (
-            W
-            @ (
-                np.linalg.inv((W.T * Tau[:, pheno]) @ W)
-                @ (W.T @ (X.T * Tau[:, pheno]).T)
-            )
-        )
-        numerators = g_hat.T @ (y_hat[:, pheno])
+        numerators = X.T @ (y_hat[:, pheno])
+        K = np.linalg.inv((W.T * Tau[:, pheno]) @ W)
+        temp = W.T @ (X.T * Tau[:, pheno]).T
         denominator = np.array(
-            [g_hat[:, v].dot(g_hat[:, v] * Tau[:, pheno]) for v in range(M)]
+            [
+                X[:, v].dot(X[:, v] * Tau[:, pheno]) + (temp[:, v]).T @ (K @ temp[:, v])
+                for v in range(M)
+            ]
         )
         chisq[pheno] = numerators**2 / denominator
         ##beta for logistic regression
