@@ -262,11 +262,6 @@ def get_test_statistics_bgen(
     pheno_columns = traits.columns.tolist()
 
     Parallel(n_jobs=n_workers)(
-        delayed(rename_columns)(offset + str(C) + ".offsets", pheno_columns)
-        for C in unique_chrs
-    )
-
-    Parallel(n_jobs=n_workers)(
         delayed(preprocess_offsets)(
             offset + str(C) + ".offsets",
             pheno_columns,
