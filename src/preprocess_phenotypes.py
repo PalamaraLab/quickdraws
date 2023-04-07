@@ -177,9 +177,9 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
     Trait_covar[["FID", "IID"] + pheno_columns].to_csv(
         filename + ".traits", index=None, sep="\t", na_rep="NA"
     )
-    Trait_covar[["FID", "IID"] + covar_columns].to_csv(
-        filename + ".covar_effects", index=None, sep="\t", na_rep="NA"
-    )
+    covar_effects = Trait_covar[["FID", "IID"] + covar_columns]
+    covar_effects.columns = ["FID", "IID"] + pheno_columns
+    covar_effects.to_csv(filename + ".covar_effects", index=None, sep="\t", na_rep="NA")
 
     snp_on_disk = Bed(bed, count_A1=True)
 

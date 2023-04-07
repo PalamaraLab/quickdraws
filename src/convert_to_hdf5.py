@@ -121,6 +121,9 @@ def convert_to_hdf5(
     dset5 = h1.create_dataset("std_genotype", data=std_genotype, dtype=float)
     dset55 = h1.create_dataset("covars", data=covars_arr, dtype=float)
     dset6 = h1.create_dataset("sample_indices", data=sample_indices, dtype=int)
+    dset7 = h1.create_dataset(
+        "iid", data=np.array(snp_on_disk.iid[sample_indices], dtype=int), dtype="int"
+    )
 
     # sum_genotype = np.zeros(total_snps)
     # sum_square_genotype = np.zeros(total_snps)

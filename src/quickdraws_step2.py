@@ -5,6 +5,7 @@ Author: Yiorgos + Hrushi
 import os
 import numpy as np
 from pysnptools.snpreader import Bed
+from pysnptools.distreader import Bgen
 import subprocess
 from multiprocessing import get_context
 from multiprocessing.pool import Pool as Pool
@@ -32,17 +33,14 @@ def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
 
 
-def preprocess_offsets(
-    bedfile, offsets, sample_indices, pheno_columns, sample_file=None, adj_suffix=""
-):
-    snp_on_disk = Bed(bedfile, count_A1=True)
-    iid_fid = snp_on_disk.iid[sample_indices]
-    df_iid_fid = pd.DataFrame(np.array(iid_fid, dtype=int), columns=["FID", "IID"])
+def rename_columns(offsets, col_list):
     df_offsets = pd.read_csv(offsets, sep="\s+")
-    if "IID" not in df_offsets.columns:
-        df_concat = pd.concat([df_iid_fid, df_offsets], axis=1)
-    else:
-        df_concat = df_offsets
+    df_offsets.columns = col_list
+    df_offsets.to_csv(offsets, sep="\t", index=None)
+
+
+def preprocess_offsets(offsets, pheno_columns, sample_file=None, adj_suffix=""):
+    df_concat = pd.read_csv(offsets, sep="\s+")
     df_concat.columns = pheno_columns
     if sample_file is not None:
         sample_file = pd.read_csv(sample_file, sep="\s+")
@@ -133,7 +131,6 @@ def get_test_statistics(
     phenofile,
     covareffectsfile,
     offset,
-    sample_indices,
     unrel_homo_file,
     ldscores,
     covar,
@@ -154,13 +151,9 @@ def get_test_statistics(
     print(pheno_columns)
 
     Parallel(n_jobs=n_workers)(
-        delayed(preprocess_offsets)(
-            bedfile, offset + str(C) + ".offsets", sample_indices, pheno_columns
-        )
+        delayed(rename_columns)(offset + str(C) + ".offsets", pheno_columns)
         for C in unique_chrs
     )
-    preprocess_offsets(bedfile, phenofile, sample_indices, pheno_columns)
-    preprocess_offsets(bedfile, covareffectsfile, sample_indices, pheno_columns)
 
     if calibrate:
         # Run LR-unRel using our numba implementation
@@ -232,7 +225,7 @@ def get_test_statistics(
         partial_calibrate_test_stats = partial(
             calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out, binary
         )
-        correction = Parallel(n_jobs=min(8, n_workers))(
+        correction = Parallel(n_jobs=min(1, n_workers))(
             delayed(partial_calibrate_test_stats)(i) for i in pheno_columns[2:]
         )
         np.savetxt(out + ".calibration", correction)
@@ -245,10 +238,8 @@ def get_test_statistics(
 def get_test_statistics_bgen(
     bgenfile,
     samplefile,
-    bedfile,
     phenofile,
     offset,
-    sample_indices,
     covar,
     calibrationFile,
     extractFile,
@@ -264,26 +255,28 @@ def get_test_statistics_bgen(
         calibration_factors = np.loadtxt(calibrationFile)
         print(calibration_factors)
 
-    snp_on_disk = Bed(bedfile, count_A1=True)
+    snp_on_disk = Bgen(bgenfile, sample=samplefile)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
     offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
     traits = pd.read_csv(phenofile, sep="\s+")
     pheno_columns = traits.columns.tolist()
 
     Parallel(n_jobs=n_workers)(
+        delayed(rename_columns)(offset + str(C) + ".offsets", pheno_columns)
+        for C in unique_chrs
+    )
+
+    Parallel(n_jobs=n_workers)(
         delayed(preprocess_offsets)(
-            bedfile,
             offset + str(C) + ".offsets",
-            sample_indices,
             pheno_columns,
             samplefile,
+            adj_suffix=".preprocessed",
         )
         for C in unique_chrs
     )
     preprocess_offsets(
-        bedfile,
         phenofile,
-        sample_indices,
         pheno_columns,
         samplefile,
         adj_suffix=".preprocessed",
@@ -292,9 +285,9 @@ def get_test_statistics_bgen(
         bgenfile,
         samplefile,
         [phenofile + ".preprocessed"] * len(unique_chrs),
-        offsetFileList,
+        [offset + ".preprocessed" for offset in offsetFileList],
         covar,
-        out + "_bgen",
+        out,
         unique_chrs,
         extractFile,
         num_threads=n_workers,
@@ -307,7 +300,7 @@ def get_test_statistics_bgen(
         if calibration_factors.shape == ():
             calibration_factors = [calibration_factors]
         Parallel(n_jobs=n_workers)(
-            delayed(adjust_test_stats)(out + "_bgen", pheno, correction)
+            delayed(adjust_test_stats)(out, pheno, correction)
             for (pheno, correction) in zip(pheno_columns[2:], calibration_factors)
         )
 
@@ -350,8 +343,6 @@ if __name__ == "__main__":
         help="prefix for where to save any results or files",
         default="out",
     )
-    parser.add_argument("--hdf5", type=str, help="File name of the hdf5 file to use")
-
     parser.add_argument("--bgen", help="Location to Bgen file", type=str)
     parser.add_argument("--sample", help="Location to samples file", type=str)
     parser.add_argument(
@@ -386,7 +377,6 @@ if __name__ == "__main__":
 
     traits = args.output_step1 + ".traits"
     covareffects = args.output_step1 + ".covar_effects"
-    sample_indices = np.array(h5py.File(args.hdf5, "r")["sample_indices"])
 
     ######      Calculating test statistics       ######
     st = time.time()
@@ -397,7 +387,6 @@ if __name__ == "__main__":
             traits,
             covareffects,
             offsets_file,
-            sample_indices,
             args.unrel_sample_list,
             args.ldscores,
             args.covar,
@@ -411,10 +400,8 @@ if __name__ == "__main__":
         get_test_statistics_bgen(
             args.bgen,
             args.sample,
-            args.bed,
             traits,
             offsets_file,
-            sample_indices,
             args.covar,
             args.calibrationFile,
             args.extract,

@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from joblib import Parallel, delayed
 
-import bitsandbytes as bnb
+# import bitsandbytes as bnb
 import gc
 import pdb
 
@@ -251,6 +251,7 @@ class HDF5Dataset:
         self.covars = torch.as_tensor(np.array(h5py_file["covars"])).float()
         self.num_snps = len(self.std_genotype)
         self.chr = torch.as_tensor(np.array(h5py_file["chr"])).float()
+        self.iid = np.array(h5py_file["iid"], dtype=int)
         ### Using the mean and std genotype calculated on entire dataset, doesn't change the results
         self.length = len(self.output)
         h5py_file.close()
@@ -300,6 +301,9 @@ class Trainer:
         self.device = device
         self.model_list = model_list
         self.num_samples = train_dataset.length
+        self.df_iid_fid = pd.DataFrame(
+            np.array(train_dataset.iid, dtype=int), columns=["FID", "IID"]
+        )
         self.validate_every = validate_every if validate_every > 0 else 1
         self.never_validate = validate_every < 0
         self.chr_map = chr_map
@@ -324,7 +328,7 @@ class Trainer:
         self.optimizer_list = []
         for model_no, model in enumerate(model_list):
             self.optimizer_list.append(
-                bnb.optim.Adam(
+                torch.optim.Adam(
                     model.parameters(),
                     lr=lr[model_no // self.num_chr]
                     if len(lr) != len(model_list)
@@ -332,7 +336,7 @@ class Trainer:
                     eps=adam_eps,
                     weight_decay=weight_decay,
                     betas=(0.9, 0.995),
-                    optim_bits=8,
+                    # optim_bits=8,
                 )
             )
         if self.args.cosine_scheduler:
@@ -606,8 +610,11 @@ class Trainer:
                         )
                 prev += len(input)
             for chr_no, chr in enumerate(torch.unique(self.chr_map)):
-                pd.DataFrame(loco_estimates[chr_no]).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t"
+                df_concat = pd.concat(
+                    [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no])], axis=1
+                )
+                pd.DataFrame(df_concat).to_csv(
+                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
                 )
 
     def train_epoch(self, epoch):
@@ -1105,9 +1112,9 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     else:
         print("Saving exact LOCO estimates..")
         start_time = time.time()
-        trainer.save_variational_parameters(
-            np.argmax(output_r2_subset, axis=1), args.output
-        )
+        # trainer.save_variational_parameters(
+        #     np.argmax(output_r2_subset, axis=1), args.output
+        # )
         trainer.save_exact_blup_estimates(
             np.argmax(output_r2_subset, axis=1), args.output
         )
