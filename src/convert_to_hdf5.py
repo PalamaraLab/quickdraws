@@ -23,6 +23,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
         on=["FID"],
     )
     df_covar["ALL_CONST"] = 1
+    df_covar = df_covar.fillna(df_covar.median())
     covars = df_covar[df_covar.columns[2:]].values
     K = np.linalg.inv(covars.T @ covars)
     geno_covar_effect = np.zeros((covars.shape[1], snp_on_disk.shape[1]))
