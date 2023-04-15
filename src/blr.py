@@ -851,30 +851,16 @@ def initialize_model(
     return model_list
 
 
-def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
+def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda"):
     # Define datasets and dataloaders
     print("Loading the data to RAM..")
     start_time = time.time()
-    train_dataset = HDF5Dataset(
-        split="train",
-        filename=hdf5_filename,
-        phen_col="phenotype",
-        transform=None,
-        train_split=args.train_split,
-    )
     dim_out = train_dataset.output.shape[1]
     if np.ndim(h2) == 0:
         h2 = np.array([h2] * dim_out)
     assert len(h2) == dim_out
     if len(args.lr) != len(alpha) and len(args.lr) == 1:
         args.lr = args.lr * len(alpha)
-    test_dataset = HDF5Dataset(
-        split="test",
-        filename=hdf5_filename,
-        phen_col="phenotype",
-        transform=None,
-        train_split=args.train_split,
-    )
     print("Done loading in: " + str(time.time() - start_time) + " secs")
     # Define model and enable wandb live policy
     std_genotype = torch.as_tensor(train_dataset.std_genotype).float()
@@ -905,7 +891,7 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
         validate_every=-1,
     )
     ##caution!!
-    for epoch in tqdm(range(30)):
+    for epoch in tqdm(range(1)):
         log_dict = trainer.train_epoch(epoch)
 
     print("Done search for alpha in: " + str(time.time() - start_time) + " secs")
@@ -954,10 +940,6 @@ def hyperparam_search(args, alpha, h2, hdf5_filename, device="cuda"):
         mu_list[prs_no] = mu
         spike_list[prs_no] = spike
 
-    del train_dataset.hap1
-    del train_dataset.hap2
-    del test_dataset.hap1
-    del test_dataset.hap2
     for i in range(len(model_list)):
         del model_list[0]
     del model_list
@@ -987,12 +969,27 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## hard-coding alpha values as in BOLT
     alpha = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
+    train_dataset = HDF5Dataset(
+        split="train",
+        filename=hdf5_filename,
+        phen_col="phenotype",
+        transform=None,
+        train_split=args.train_split,
+    )
+    test_dataset = HDF5Dataset(
+        split="test",
+        filename=hdf5_filename,
+        phen_col="phenotype",
+        transform=None,
+        train_split=args.train_split,
+    )
+
     if args.h2_grid:
         output_r2, mu, spike = [], [], []
-        h2_grid = np.array([0.01, 0.25, 0.5, 0.75, 0.9])
+        h2_grid = np.array([0.01, 0.25, 0.5, 0.75])
         for h2_i in h2_grid:
             output_r2_i, mu_i, spike_i = hyperparam_search(
-                args, alpha, h2_i, hdf5_filename, device=device
+                args, alpha, h2_i, train_dataset, test_dataset, device=device
             )
             output_r2.append(output_r2_i)
             mu.append(mu_i)
@@ -1002,8 +999,22 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         spike = np.array(spike)
     else:
         output_r2, mu, spike = hyperparam_search(
-            args, alpha, h2, hdf5_filename, device=device
+            args, alpha, h2, train_dataset, test_dataset, device=device
         )
+
+    del train_dataset.hap1
+    del train_dataset.hap2
+    del train_dataset.output
+    del train_dataset.covar_effect
+    del train_dataset.geno_covar_effect
+    del train_dataset.covars
+    del test_dataset.hap1
+    del test_dataset.hap2
+    del test_dataset.output
+    del test_dataset.covar_effect
+    del test_dataset.geno_covar_effect
+    del test_dataset.covars
+    gc.collect()
 
     ### 🌵
     # device = "cuda"
@@ -1112,9 +1123,6 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     else:
         print("Saving exact LOCO estimates..")
         start_time = time.time()
-        # trainer.save_variational_parameters(
-        #     np.argmax(output_r2_subset, axis=1), args.output
-        # )
         trainer.save_exact_blup_estimates(
             np.argmax(output_r2_subset, axis=1), args.output
         )
