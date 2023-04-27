@@ -891,8 +891,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         validate_every=3,
     )
     ##caution!!
-    print("here 1")
-    for epoch in tqdm(range(1)):
+    for epoch in tqdm(range(30)):
         log_dict = trainer.train_epoch(epoch)
 
     print("Done search for alpha in: " + str(time.time() - start_time) + " secs")
@@ -911,12 +910,12 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
             ]
 
     print("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
-    print("Best MSE across all alpha values: " + str(np.max(output_loss, axis=1)))
+    print("Best MSE across all alpha values: " + str(np.min(output_loss, axis=1)))
 
     best_alpha = (
         np.argmax(output_r2, axis=1)
         if not args.binary
-        else np.argmax(output_loss, axis=1)
+        else np.argmin(output_loss, axis=1)
     )
     mu_list = np.zeros((dim_out, len(std_genotype)))
     spike_list = np.zeros((dim_out, len(std_genotype)))
@@ -941,7 +940,6 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         mu_list[prs_no] = mu
         spike_list[prs_no] = spike
 
-    print("here 2")
     for i in range(len(model_list)):
         del model_list[0]
     del model_list
@@ -950,6 +948,8 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     gc.collect()
     with torch.no_grad():
         torch.cuda.empty_cache()
+    if args.binary:
+        return -output_loss, mu_list, spike_list
     return output_r2, mu_list, spike_list
 
 
