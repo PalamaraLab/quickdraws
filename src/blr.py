@@ -52,7 +52,7 @@ class BBB_Linear_spike_slab(nn.Module):
     def forward(self, x, mu1, only_output=False, test=False):
         eps = 1e-12
         self.c = min(self.c + 0.01, 10)
-        sig1 = F.relu(self.sigma1)
+        sig1 = torch.clamp(F.relu(self.sigma1), min=eps)
         weight_mu = mu1.weight
         spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
         # weight = self.reparameterize(weight_mu, sig1, weight_mu.device, test)
@@ -888,10 +888,11 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=-1,
+        validate_every=3,
     )
     ##caution!!
-    for epoch in tqdm(range(30)):
+    print("here 1")
+    for epoch in tqdm(range(1)):
         log_dict = trainer.train_epoch(epoch)
 
     print("Done search for alpha in: " + str(time.time() - start_time) + " secs")
@@ -940,6 +941,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         mu_list[prs_no] = mu
         spike_list[prs_no] = spike
 
+    print("here 2")
     for i in range(len(model_list)):
         del model_list[0]
     del model_list
