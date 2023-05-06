@@ -225,7 +225,7 @@ def get_test_statistics(
         partial_calibrate_test_stats = partial(
             calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out, binary
         )
-        correction = Parallel(n_jobs=min(1, n_workers))(
+        correction = Parallel(n_jobs=min(8, n_workers))(
             delayed(partial_calibrate_test_stats)(i) for i in pheno_columns[2:]
         )
         np.savetxt(out + ".calibration", correction)
@@ -254,6 +254,8 @@ def get_test_statistics_bgen(
     if calibrationFile is not None:
         calibration_factors = np.loadtxt(calibrationFile)
         print(calibration_factors)
+    else:
+        calibration_factors = np.ones(traits.columns.tolist() - 2)
 
     snp_on_disk = Bgen(bgenfile, sample=samplefile)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
@@ -276,6 +278,17 @@ def get_test_statistics_bgen(
         samplefile,
         adj_suffix=".preprocessed",
     )
+    if firth:
+        Parallel(n_jobs=n_workers)(
+            delayed(preprocess_offsets)(
+                offset + str(C) + ".offsets.firth_null",
+                pheno_columns,
+                samplefile,
+                adj_suffix=".preprocessed",
+            )
+            for C in unique_chrs
+        )
+
     get_unadjusted_test_statistics_bgen(
         bgenfile,
         samplefile,
@@ -289,15 +302,15 @@ def get_test_statistics_bgen(
         binary=binary,
         firth=firth,
         firth_pval_thresh=firth_pval_thresh,
+        firth_null=[offset + ".firth_null.preprocessed" for offset in offsetFileList],
     )
 
-    if calibrationFile is not None:
-        if calibration_factors.shape == ():
-            calibration_factors = [calibration_factors]
-        Parallel(n_jobs=n_workers)(
-            delayed(adjust_test_stats)(out, pheno, correction)
-            for (pheno, correction) in zip(pheno_columns[2:], calibration_factors)
-        )
+    if calibration_factors.shape == ():
+        calibration_factors = [calibration_factors]
+    Parallel(n_jobs=n_workers)(
+        delayed(adjust_test_stats)(out, pheno, correction)
+        for (pheno, correction) in zip(pheno_columns[2:], calibration_factors)
+    )
 
 
 if __name__ == "__main__":

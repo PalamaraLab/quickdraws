@@ -183,9 +183,13 @@ def firth_parallel(
 
 def firth_null_parallel(offsetFile, Y, covar_effects, covars):
     offset = pd.read_csv(offsetFile, sep="\s+")
+    iid_fid = offset[["FID", "IID"]]
     offset = offset[offset.columns[2:]].values.astype("float32")
     random_effects = logit(offset) - covar_effects
     pred_covars, _, _ = firth_logit_covars(covars, Y, random_effects)
+    pd.concat([iid_fid, pd.DataFrame(pred_covars)], axis=1).to_csv(
+        offsetFile + ".firth_null", sep="\t", index=None
+    )
     return pred_covars
 
 
@@ -327,6 +331,7 @@ def get_unadjusted_test_statistics_bgen(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
+    firth_null=False,
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -397,13 +402,23 @@ def get_unadjusted_test_statistics_bgen(
     pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
 
-    if binary and firth:
+    if binary and firth and firth_null is None:
         pred_covars_arr = Parallel(n_jobs=num_threads)(
             delayed(firth_null_parallel)(
                 offsetFileList[chr_no], Y, covar_effects, covars
             )
             for chr_no in range(len(np.unique(chr_map)))
         )
+    elif binary and firth and firth_null is not None:
+        pred_covars_arr = []
+        for chr_no in range(len(np.unique(chr_map))):
+            firth_null_chr = pd.read_csv(firth_null[chr_no], sep="\s+")
+            mdf = pd.merge(
+                pd.read_csv(offsetFileList[chr_no], sep="\s+")[["IID", "FID"]],
+                firth_null_chr,
+                on=["FID", "IID"],
+            )
+            pred_covars_arr.append(mdf.values[:, 2:])
 
     prev = 0
     for chr_no, chr in enumerate(unique_chrs):
