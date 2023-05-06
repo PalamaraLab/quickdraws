@@ -15,13 +15,14 @@ import numpy as np
 from scipy import stats
 import math
 import pandas as pd
+import copy
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from joblib import Parallel, delayed
 
-import bitsandbytes as bnb
+# import bitsandbytes as bnb
 import gc
 import pdb
 
@@ -328,7 +329,7 @@ class Trainer:
         self.optimizer_list = []
         for model_no, model in enumerate(model_list):
             self.optimizer_list.append(
-                bnb.optim.Adam(
+                torch.optim.Adam(
                     model.parameters(),
                     lr=lr[model_no // self.num_chr]
                     if len(lr) != len(model_list)
@@ -336,7 +337,7 @@ class Trainer:
                     eps=adam_eps,
                     weight_decay=weight_decay,
                     betas=(0.9, 0.995),
-                    optim_bits=8,
+                    # optim_bits=8,
                 )
             )
         if self.args.cosine_scheduler:
@@ -987,18 +988,23 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     )
 
     if args.h2_grid:
-        output_r2, mu, spike = [], [], []
         h2_grid = np.array([0.01, 0.25, 0.5, 0.75])
-        for h2_i in h2_grid:
+        for i, h2_i in enumerate(h2_grid):
             output_r2_i, mu_i, spike_i = hyperparam_search(
                 args, alpha, h2_i, train_dataset, test_dataset, device=device
             )
-            output_r2.append(output_r2_i)
-            mu.append(mu_i)
-            spike.append(spike_i)
-        output_r2 = np.array(output_r2)
-        mu = np.array(mu)
-        spike = np.array(spike)
+            if i == 0:
+                output_r2 = copy.deepcopy(output_r2_i)
+                mu = copy.deepcopy(mu_i)
+                spike = copy.deepcopy(spike_i)
+                h2 = [h2_i] * len(mu_i)
+            else:
+                for phen in range(len(mu_i)):
+                    if np.max(output_r2_i[phen]) > np.max(output_r2[phen]):
+                        mu[phen] = mu_i[phen]
+                        spike[phen] = spike_i[phen]
+                        h2[phen] = h2_i
+                output_r2 = np.maximum(output_r2, output_r2_i)
     else:
         output_r2, mu, spike = hyperparam_search(
             args, alpha, h2, train_dataset, test_dataset, device=device
@@ -1023,15 +1029,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     # output_r2, mu, spike = np.zeros((len(h2), len(alpha))), None, None
     with torch.no_grad():
         torch.cuda.empty_cache()
-
-    if args.h2_grid:
-        output_r2_best_alpha = np.max(output_r2, axis=2)
-        h2 = h2_grid[np.argmax(output_r2_best_alpha, axis=0)]
-        print("Heritability estimated through grid search: " + str(h2))
-        output_r2 = np.max(output_r2, axis=0)
-        mu = mu[np.argmax(output_r2_best_alpha, axis=0)[0]]
-        spike = spike[np.argmax(output_r2_best_alpha, axis=0)[0]]
-
+    gc.collect()
     alpha = np.array(alpha)[np.unique(np.argmax(output_r2, axis=1))]
 
     output_r2_subset = output_r2[:, np.unique(np.argmax(output_r2, axis=1))]
