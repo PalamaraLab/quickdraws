@@ -783,6 +783,7 @@ def initialize_model(
         std_genotype = std_genotype.unsqueeze(0)
         std_y = std_y.unsqueeze(1)
 
+    std_y = 1
     for alpha_no, alpha in enumerate(alpha_list):
         if h2.ndim == 1:
             prior_sig = math.sqrt(1 / len(std_genotype) / alpha) / std_genotype
@@ -918,6 +919,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         if not args.binary
         else np.argmin(output_loss, axis=1)
     )
+    print(best_alpha)
     mu_list = np.zeros((dim_out, len(std_genotype)))
     spike_list = np.zeros((dim_out, len(std_genotype)))
     for prs_no in range(dim_out):
