@@ -1184,7 +1184,14 @@ if __name__ == "__main__":
         help="Learning rate of the optimizer",
         type=float,
         nargs="+",
-        default=[4e-4, 4e-4, 2e-4, 2e-4, 5e-5, 2e-5],
+        default=[
+            4e-4,
+            2e-4,
+            5e-5,
+            2e-5,
+            1e-5,
+            5e-6,
+        ],
     )
     parser.add_argument(
         "-lr_min",
