@@ -893,7 +893,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         validate_every=3,
     )
     ##caution!!
-    for epoch in tqdm(range(30)):
+    for epoch in tqdm(range(45)):
         log_dict = trainer.train_epoch(epoch)
 
     print("Done search for alpha in: " + str(time.time() - start_time) + " secs")

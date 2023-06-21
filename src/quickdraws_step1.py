@@ -99,7 +99,7 @@ parser.add_argument(
 )
 ## hyperparameters arguments
 parser.add_argument(
-    "--num_epochs", help="number of epochs to train for", type=int, default=10
+    "--num_epochs", help="number of epochs to train for", type=int, default=15
 )
 parser.add_argument(
     "--lr",
@@ -107,12 +107,12 @@ parser.add_argument(
     type=float,
     nargs="+",
     default=[
-        4e-4,
         2e-4,
+        2e-4,
+        2e-4,
+        1e-4,
         5e-5,
-        2e-5,
         1e-5,
-        5e-6,
     ],  ##changed from [4e-4, 4e-4, 2e-4, 2e-4, 5e-5, 2e-5]
 )
 # parser.add_argument(
