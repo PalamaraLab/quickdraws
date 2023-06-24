@@ -107,7 +107,7 @@ parser.add_argument(
     type=float,
     nargs="+",
     default=[
-        2e-4,
+        4e-4,
         2e-4,
         2e-4,
         1e-4,
