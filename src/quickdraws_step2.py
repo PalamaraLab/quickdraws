@@ -110,8 +110,6 @@ def calibrate_test_stats(
         correction = intercept_ref / intercept_cur
 
     sumstats_cur["CHISQ"] *= correction
-    if mean_sumstats_cur <= 0.98 and match_yinter:
-        sumstats_cur["CHISQ"] = sumstats_ref["CHISQ"]
     sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
