@@ -249,17 +249,18 @@ def get_test_statistics_bgen(
 ):
     if n_workers == -1:
         n_workers = len(os.sched_getaffinity(0)) - 1
-    if calibrationFile is not None:
-        calibration_factors = np.loadtxt(calibrationFile)
-        print(calibration_factors)
-    else:
-        calibration_factors = np.ones(traits.columns.tolist() - 2)
 
     snp_on_disk = Bgen(bgenfile, sample=samplefile)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
     offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
     traits = pd.read_csv(phenofile, sep="\s+")
     pheno_columns = traits.columns.tolist()
+
+    if calibrationFile is not None:
+        calibration_factors = np.loadtxt(calibrationFile)
+        print(calibration_factors)
+    else:
+        calibration_factors = np.ones(len(traits.columns.tolist()) - 2)
 
     Parallel(n_jobs=n_workers)(
         delayed(preprocess_offsets)(
@@ -274,7 +275,7 @@ def get_test_statistics_bgen(
         phenofile,
         pheno_columns,
         samplefile,
-        adj_suffix=".preprocessed",
+        adj_suffix=str(unique_chrs) + ".preprocessed",
     )
     if firth:
         Parallel(n_jobs=n_workers)(
@@ -290,7 +291,7 @@ def get_test_statistics_bgen(
     get_unadjusted_test_statistics_bgen(
         bgenfile,
         samplefile,
-        [phenofile + ".preprocessed"] * len(unique_chrs),
+        [phenofile + str(unique_chrs) + ".preprocessed"] * len(unique_chrs),
         [offset + ".preprocessed" for offset in offsetFileList],
         covar,
         out,
