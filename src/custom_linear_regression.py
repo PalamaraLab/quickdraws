@@ -331,7 +331,7 @@ def get_unadjusted_test_statistics_bgen(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
-    firth_null=False,
+    firth_null=None,
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -396,7 +396,10 @@ def get_unadjusted_test_statistics_bgen(
     print("Running linear/logistic regression to get association")
 
     covar_effects = pd.read_csv(
-        phenoFileList[0].split(".traits")[0] + ".covar_effects", sep="\s+"
+        phenoFileList[0].split(".traits")[0]
+        + ".covar_effects"
+        + phenoFileList[0].split(".traits")[1],
+        sep="\s+",
     )
     covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
     pheno = pd.read_csv(phenoFileList[0], sep="\s+")

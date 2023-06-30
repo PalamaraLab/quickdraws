@@ -277,6 +277,12 @@ def get_test_statistics_bgen(
         samplefile,
         adj_suffix=str(unique_chrs) + ".preprocessed",
     )
+    preprocess_offsets(
+        phenofile.split(".traits")[0] + ".covar_effects",
+        pheno_columns,
+        samplefile,
+        adj_suffix=str(unique_chrs) + ".preprocessed",
+    )
     if firth:
         Parallel(n_jobs=n_workers)(
             delayed(preprocess_offsets)(
