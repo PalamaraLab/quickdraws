@@ -5,6 +5,7 @@ import pdb
 import numba
 import copy
 
+
 def _loglikelihood_se_svt(X, y, preds):
     # penalized log-likelihood
     W = preds * (1 - preds)
@@ -13,6 +14,7 @@ def _loglikelihood_se_svt(X, y, preds):
     penalty = 0.5 * np.log(I)
     se = np.sqrt(1 / I)
     return -1 * (np.sum(y * np.log(preds) + (1 - y) * np.log(1 - preds)) + penalty), se
+
 
 def firth_logit_svt(
     X_orig, y_all, offset_all, covars=None, max_iter=250, max_stepsize=5, tol=1e-4
@@ -103,7 +105,7 @@ def firth_logit_svt(
             loglike_all[p] = -loglike
             iters_all[p] = max_iter
             se_all[p] = se
-    return weights_all, se_all, loglike_all-loglike_null, iters_all
+    return weights_all, se_all, loglike_all - loglike_null, iters_all
 
 
 def _loglikelihood_covars(X, y, preds):
@@ -118,7 +120,7 @@ def _loglikelihood_covars(X, y, preds):
     return -1 * (np.sum(y * np.log(preds) + (1 - y) * np.log(1 - preds)) + penalty)
 
 
-def firth_logit_covars(X, y_all, offset_all, max_iter=1000, max_stepsize=25, tol=1e-5):
+def firth_logit_covars(X, y_all, offset_all, max_iter=200, max_stepsize=25, tol=1e-5):
     """
     Firth logistic regression for 'only' covariates
     X: Covariate matrix shape NxC
@@ -138,6 +140,7 @@ def firth_logit_covars(X, y_all, offset_all, max_iter=1000, max_stepsize=25, tol
 
         # Perform gradient descent
         for iter in range(max_iter):
+            print(iter)
 
             z = np.dot(X, weights)
             y_pred = 1 / (1 + np.exp(-z - offset))
@@ -218,7 +221,7 @@ if __name__ == "__main__":
     pred_covars, loglike_null, iters_null = firth_logit_covars(covar, y_all, offset_all)
     print(time.time() - st)
     beta, se, loglike, iters = firth_logit_svt(geno, y_all, pred_covars, covar)
-    lr_stat = 2*loglike
+    lr_stat = 2 * loglike
     p_value = chi2.sf(lr_stat, df=1)
     print("X^2 = " + str(lr_stat) + " p-value = " + str(p_value))
     pdb.set_trace()
