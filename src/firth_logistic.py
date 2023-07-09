@@ -132,6 +132,7 @@ def firth_logit_covars(X, y_all, offset_all, max_iter=200, max_stepsize=25, tol=
     loglike_all = np.zeros(y_all.shape[1])
     iters_all = np.zeros(y_all.shape[1])
     for p in range(y_all.shape[1]):
+        print(p)
         y = y_all[:, p]
         offset = offset_all[:, p]
 
@@ -140,7 +141,6 @@ def firth_logit_covars(X, y_all, offset_all, max_iter=200, max_stepsize=25, tol=
 
         # Perform gradient descent
         for iter in range(max_iter):
-            print(iter)
 
             z = np.dot(X, weights)
             y_pred = 1 / (1 + np.exp(-z - offset))
