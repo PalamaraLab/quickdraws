@@ -120,7 +120,7 @@ def _loglikelihood_covars(X, y, preds):
     return -1 * (np.sum(y * np.log(preds) + (1 - y) * np.log(1 - preds)) + penalty)
 
 
-def firth_logit_covars(X, y_all, offset_all, max_iter=200, max_stepsize=25, tol=1e-5):
+def firth_logit_covars(X, y_all, offset_all, max_iter=1000, max_stepsize=25, tol=1e-5):
     """
     Firth logistic regression for 'only' covariates
     X: Covariate matrix shape NxC
