@@ -97,6 +97,7 @@ def calibrate_test_stats(
 
     sumstats_cur = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
     ## we do this two times because the sumstats_cur could be way off from the sumstats_ref
+    overall_correction = 1
     for _ in range(2):
         mask_dodgy_cur = get_mask_dodgy(
             ldscores[["SNP", "LDSCORE"]], sumstats_cur, np.mean(sumstats_cur["OBS_CT"])
@@ -110,6 +111,8 @@ def calibrate_test_stats(
         )
         if match_yinter:
             correction = intercept_ref / intercept_cur
+
+        overall_correction *= correction
         sumstats_cur["CHISQ"] *= correction
         sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
 
@@ -123,7 +126,7 @@ def calibrate_test_stats(
     )
 
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
-    return correction
+    return overall_correction
 
 
 def get_test_statistics(
