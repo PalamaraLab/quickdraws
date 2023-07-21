@@ -914,11 +914,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     print("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
     print("Best MSE across all alpha values: " + str(np.min(output_loss, axis=1)))
 
-    best_alpha = (
-        np.argmax(output_r2, axis=1)
-        if not args.binary
-        else np.argmin(output_loss, axis=1)
-    )
+    best_alpha = np.argmin(output_loss, axis=1)
     print(best_alpha)
     mu_list = np.zeros((dim_out, len(std_genotype)))
     spike_list = np.zeros((dim_out, len(std_genotype)))
@@ -951,9 +947,8 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     gc.collect()
     with torch.no_grad():
         torch.cuda.empty_cache()
-    if args.binary:
-        return -output_loss, mu_list, spike_list
-    return output_r2, mu_list, spike_list
+
+    return -output_loss, mu_list, spike_list
 
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
