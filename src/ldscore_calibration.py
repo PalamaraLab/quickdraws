@@ -10,7 +10,6 @@ import subprocess
 from pathlib import Path
 import random
 from pysnptools.snpreader import Bed
-from tqdm import tqdm
 import pdb
 import copy
 import gc
@@ -35,7 +34,7 @@ def calc_ldscore_chip(bed, mask_dodgy_snp, unrel_sample_list=None, num_samples=4
     mask_dodgy_snp: binary mask array for SNPs
     mask_dodgy_samples: binary mask array for samples
     """
-    print("Calculating chip LD score on {0} random samples".format(num_samples))
+    # print("Calculating chip LD score on {0} random samples".format(num_samples))
     snp_data = Bed(bed, count_A1=True)
     chr_map = snp_data.pos[:, 0]  ## chr_no
     pos = snp_data.pos[:, 2]  ## bp pos
@@ -73,7 +72,7 @@ def calc_ldscore_chip(bed, mask_dodgy_snp, unrel_sample_list=None, num_samples=4
 
     ## calculate unadjusted r2 among variants, then adjust it
     ld_score_chip = np.zeros(geno.shape[0])
-    for chr in tqdm(np.unique(chr_map)):
+    for chr in np.unique(chr_map):
         nearby_snps_in_chr = np.arange(geno.shape[0])[chr_map == chr]
         pos_chr = pos[chr_map == chr]
         mask_dodgy_chr = mask_dodgy_snp[chr_map == chr]
@@ -169,7 +168,7 @@ def ldscore_intercept(ldscores, sumstats, ldscore_chip, mask_dodgy):
     ldscore_chip_arr = np.array(
         ldscore_chip["LDSCORE_CHIP"].values[mask_dodgy], dtype="float"
     )
-    print("Number of SNPs available with LDscores = " + str(len(ldscore_arr)))
+    # print("Number of SNPs available with LDscores = " + str(len(ldscore_arr)))
 
     """
     Perform a weighted linear regression of CHISQ with LDSCORES to get intercept and slope
@@ -203,7 +202,7 @@ def ldscore_genetic_covar(ldscores, sumstats_1, sumstats_2, mask_dodgy):
     ldscore_arr = pd.merge(
         sumstats_1, ldscores.drop_duplicates(), on="SNP", how="left"
     )["LDSCORE"].values[mask_dodgy]
-    print("Number of SNPs available with LDscores = " + str(len(ldscore_arr)))
+    # print("Number of SNPs available with LDscores = " + str(len(ldscore_arr)))
 
     """
     Perform a weighted linear regression of CHISQ with LDSCORES to get intercept and slope

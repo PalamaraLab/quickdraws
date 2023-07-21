@@ -96,21 +96,23 @@ def calibrate_test_stats(
     atten_ratio_ref = (intercept_ref - 1) / (mean_sumstats_ref - 1)
 
     sumstats_cur = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
-    mask_dodgy_cur = get_mask_dodgy(
-        ldscores[["SNP", "LDSCORE"]], sumstats_cur, np.mean(sumstats_cur["OBS_CT"])
-    )
-    ldscore_chip_cur = calc_ldscore_chip(bedfile, mask_dodgy_cur)
-    intercept_cur, mean_sumstats_cur = ldscore_intercept(
-        ldscores, sumstats_cur, ldscore_chip_cur, mask_dodgy_cur
-    )
-    correction = (1 - atten_ratio_ref) / (
-        intercept_cur - atten_ratio_ref * mean_sumstats_cur
-    )
-    if match_yinter:
-        correction = intercept_ref / intercept_cur
+    ## we do this two times because the sumstats_cur could be way off from the sumstats_ref
+    for _ in range(2):
+        mask_dodgy_cur = get_mask_dodgy(
+            ldscores[["SNP", "LDSCORE"]], sumstats_cur, np.mean(sumstats_cur["OBS_CT"])
+        )
+        ldscore_chip_cur = calc_ldscore_chip(bedfile, mask_dodgy_cur)
+        intercept_cur, mean_sumstats_cur = ldscore_intercept(
+            ldscores, sumstats_cur, ldscore_chip_cur, mask_dodgy_cur
+        )
+        correction = (1 - atten_ratio_ref) / (
+            intercept_cur - atten_ratio_ref * mean_sumstats_cur
+        )
+        if match_yinter:
+            correction = intercept_ref / intercept_cur
+        sumstats_cur["CHISQ"] *= correction
+        sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
 
-    sumstats_cur["CHISQ"] *= correction
-    sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
 
@@ -140,7 +142,7 @@ def get_test_statistics(
     n_workers=-1,
 ):
     if n_workers == -1:
-        n_workers = len(os.sched_getaffinity(0)) - 1
+        n_workers = len(os.sched_getaffinity(0))
 
     snp_on_disk = Bed(bedfile, count_A1=True)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
@@ -248,7 +250,7 @@ def get_test_statistics_bgen(
     n_workers=-1,
 ):
     if n_workers == -1:
-        n_workers = len(os.sched_getaffinity(0)) - 1
+        n_workers = len(os.sched_getaffinity(0))
 
     snp_on_disk = Bgen(bgenfile, sample=samplefile)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
