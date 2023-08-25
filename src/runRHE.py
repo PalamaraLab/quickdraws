@@ -16,7 +16,7 @@ from scipy.stats import norm
 def MakeAnnotation(bed, maf_bins, ld_score_percentiles, outfile=None):
     """Intermediate helper function to generate MAF / LD structured annotations. Credits: Arjun"""
     try:
-        df = pd.read_csv(bed + ".score.ld", sep="\s+")
+        df = pd.read_csv("/well/palamara/projects/UKBB_APPLICATION_43206/new_copy/plink_missingness_regenielike_filters/ukb_app43206_500k.maf00001.score.ld", sep="\s+")
         print("MAF/LD info are loaded for {0} SNPs".format(len(df)))
     except:
         print("File with MAF-LD scores is wrong!")

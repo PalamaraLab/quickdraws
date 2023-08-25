@@ -188,7 +188,7 @@ def get_test_statistics(
         get_unadjusted_test_statistics(
             bedfile,
             [out + ".unrel.traits"] * len(unique_chrs),
-            [out + ".unrel.covar_effects"] * len(unique_chrs),
+            [out + ".unrel.covar_effects"] * len(unique_chrs) if binary else None,
             covar,
             out + "_lrunrel",
             unique_chrs,

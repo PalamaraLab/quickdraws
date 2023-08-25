@@ -10,6 +10,7 @@ from sklearn.linear_model import LogisticRegression
 import os
 import pdb
 from scipy.special import expit
+from sklearn.preprocessing import quantile_transform
 
 
 def preprocess_phenotypes(pheno, covar, bed, removeFile, binary):
@@ -64,10 +65,10 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile, binary):
     print("{0} traits are unary and will be excluded.".format(len(traits_unary)))
     Traits.drop(Traits.columns[traits_unary], axis=1, inplace=True)
 
-    ### Median impute the missing values, to keep things simple ahead
-    # for phen_col in Traits.columns[2:]:
-    #     Traits[phen_col] = Traits[phen_col].fillna(Traits[phen_col].mean())
-    # assert sum(Traits.isna().sum()) == 0
+    ### Mean impute the missing values, to keep things simple ahead
+    for phen_col in Traits.columns[2:]:
+        Traits[phen_col] = Traits[phen_col].fillna(Traits[phen_col].mean())
+    assert sum(Traits.isna().sum()) == 0
 
     ## check if traits are binary and if nunique == 2 make them binary
     if binary:
@@ -95,9 +96,11 @@ def preprocess_phenotypes(pheno, covar, bed, removeFile, binary):
         merged_df = pd.merge(Traits.reset_index(drop=True), df_covar)
 
         ## Some covariates may have some NaN
-        if np.isnan(merged_df.values).any():
-            print("Oops! There are a few missing values in the covariates..")
-            merged_df = merged_df.fillna(merged_df.median())
+        # if np.isnan(merged_df.values).any():
+        #     print("Oops! There are a few missing values in the covariates..")
+        #     merged_df = merged_df.fillna(merged_df.median())
+        merged_df = merged_df.dropna(axis=0)
+        print(merged_df.shape)
 
         samples_to_keep = np.array(merged_df.FID, dtype=int)
         N_total = len(merged_df)

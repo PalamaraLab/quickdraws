@@ -11,6 +11,7 @@ import pdb
 from firth_logistic import firth_logit_covars, firth_logit_svt
 from scipy.special import logit
 from joblib import Parallel, delayed
+import os
 
 
 def preprocess_covars(covarFile, iid_fid):
@@ -20,12 +21,13 @@ def preprocess_covars(covarFile, iid_fid):
         covars,
         on=["FID", "IID"],
     )
-    for covar_col in covars.columns[2:]:
-        covars[covar_col] = covars[covar_col].fillna(np.nanmean(covars[covar_col]))
+    # for covar_col in covars.columns[2:]:
+    #     covars[covar_col] = covars[covar_col].fillna(np.nanmean(covars[covar_col]))
+    covars = covars.fillna(covars.median())
     covars = covars[covars.columns[2:]]
-    covars = (covars - covars.min(axis=0)) / (covars.max(axis=0) - covars.min(axis=0))
+    # covars = (covars - covars.min(axis=0)) / (covars.max(axis=0) - covars.min(axis=0))
     covars["ALL_CONST"] = 1
-    covars = np.array(covars.values, dtype="float32")
+    covars = np.array(covars.values, dtype="float64")
     return covars
 
 
@@ -116,8 +118,10 @@ def MyLinRegr(X, Y, W, offset):
     var_X = np.array(
         [X[:, v].dot(X[:, v]) - temp[:, v].dot(K.dot(temp[:, v])) for v in range(M)]
     )
-    Y = Y - offset
-    y_hat = Y - W.dot(K.dot(W.T.dot(Y)))
+    if offset is not None:
+        y_hat = Y - offset
+    else:
+        y_hat = Y - W.dot(K.dot(W.T.dot(Y)))
     numerators = X.T.dot(y_hat)
     for pheno in numba.prange(Y.shape[1]):
         var_y = Y[:, pheno].dot(y_hat[:, pheno])
@@ -184,8 +188,17 @@ def firth_parallel(
 def firth_null_parallel(offsetFile, Y, covar_effects, covars):
     offset = pd.read_csv(offsetFile, sep="\s+")
     iid_fid = offset[["FID", "IID"]]
-    offset = offset[offset.columns[2:]].values.astype("float32")
+    offset = offset[offset.columns[2:]].values.astype("float64")
     random_effects = logit(offset) - covar_effects
+    # if os.path.isfile(offsetFile + ".firth_null"):
+    #         firth_null_chr = pd.read_csv(offsetFile + ".firth_null", sep="\s+")
+    #         mdf = pd.merge(
+    #             iid_fid,
+    #             firth_null_chr,
+    #             on=["FID", "IID"],
+    #         )
+    #         pred_covars = mdf.values[:, 2:]
+    # else:
     pred_covars, _, _ = firth_logit_covars(covars, Y, random_effects)
     pd.concat([iid_fid, pd.DataFrame(pred_covars)], axis=1).to_csv(
         offsetFile + ".firth_null", sep="\t", index=None
@@ -212,12 +225,12 @@ def get_unadjusted_test_statistics(
     snp_on_disk = Bed(bedFile, count_A1=True)
     chr_map = np.array(snp_on_disk.pos[:, 0], dtype="int")  ## chr_no
 
-    offset = pd.read_csv(offsetFileList[0], sep="\s+")
+    pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     samples_dict = {}
     for i, fid in enumerate(snp_on_disk.iid[:, 0]):
         samples_dict[int(fid)] = i
     sample_indices = []
-    for fid in offset.FID:
+    for fid in pheno.FID:
         sample_indices.append(samples_dict[int(fid)])
     iid_fid = snp_on_disk.iid[sample_indices]
     snp_on_disk = snp_on_disk[sample_indices, :]
@@ -228,18 +241,17 @@ def get_unadjusted_test_statistics(
 
     ## calculate batch_size based on max_memory
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0])
-    beta_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
-    chisq_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
-    afreq_arr = np.zeros(len(chr_map), dtype="float32")
+    beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float64")
+    chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float64")
+    afreq_arr = np.zeros(len(chr_map), dtype="float64")
 
     print("Running linear/logistic regression to get association")
 
     covar_effects = pd.read_csv(
         phenoFileList[0].split(".traits")[0] + ".covar_effects", sep="\s+"
     )
-    covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
-    pheno = pd.read_csv(phenoFileList[0], sep="\s+")
-    Y = pheno[pheno.columns[2:]].values.astype("float32")
+    covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float64")
+    Y = pheno[pheno.columns[2:]].values.astype("float64")
 
     if binary and firth:
         pred_covars_arr = Parallel(n_jobs=num_threads)(
@@ -251,13 +263,17 @@ def get_unadjusted_test_statistics(
     prev = 0
     for chr_no, chr in enumerate(np.unique(chr_map)):
         ## read offset file and adjust phenotype file
-        offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
+        try:
+            offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
+            offset = offset[offset.columns[2:]].values.astype("float64")
+        except:
+            offset = None
+
         pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
-        offset = offset[offset.columns[2:]].values.astype("float32")
-        Y = pheno[pheno.columns[2:]].values.astype("float32")
-        if not binary:
-            Y -= np.mean(Y, axis=0)
-            offset -= np.mean(offset, axis=0)
+        Y = pheno[pheno.columns[2:]].values.astype("float64")
+        # if not binary:
+        #     Y -= np.mean(Y, axis=0)
+        #     offset -= np.mean(offset, axis=0)
         num_snps_in_chr = int(np.sum(chr_map == int(chr)))
         for batch in tqdm(range(0, num_snps_in_chr, batch_size)):
 
@@ -266,7 +282,7 @@ def get_unadjusted_test_statistics(
                 snp_on_disk[
                     :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
                 ]
-                .read(dtype="float32", num_threads=num_threads)
+                .read(dtype="float64", num_threads=num_threads)
                 .val
             )
             ## preprocess genotype and perform linear regression
@@ -308,7 +324,7 @@ def get_unadjusted_test_statistics(
 
     write_sumstats_file(
         bedFile,
-        pd.read_csv(offsetFileList[chr_no], sep="\s+").columns[2:],
+        pheno.columns[2:],
         snp_on_disk.shape[0],
         afreq_arr,
         beta_arr,
@@ -389,9 +405,9 @@ def get_unadjusted_test_statistics_bgen(
     ## calculate batch_size based on max_memory
     ## extra divide by 3 because bgen files give a distrution data as output (aa, Aa, AA)
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0])
-    beta_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
-    chisq_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
-    afreq_arr = np.zeros(len(chr_map), dtype="float32")
+    beta_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float64")
+    chisq_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float64")
+    afreq_arr = np.zeros(len(chr_map), dtype="float64")
 
     print("Running linear/logistic regression to get association")
 
@@ -401,9 +417,9 @@ def get_unadjusted_test_statistics_bgen(
         + phenoFileList[0].split(".traits")[1],
         sep="\s+",
     )
-    covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
+    covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float64")
     pheno = pd.read_csv(phenoFileList[0], sep="\s+")
-    Y = pheno[pheno.columns[2:]].values.astype("float32")
+    Y = pheno[pheno.columns[2:]].values.astype("float64")
 
     if binary and firth and firth_null is None:
         pred_covars_arr = Parallel(n_jobs=num_threads)(
@@ -427,9 +443,9 @@ def get_unadjusted_test_statistics_bgen(
     for chr_no, chr in enumerate(unique_chrs):
         ## read offset file and adjust phenotype file
         offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
-        offset = np.array(offset[offset.columns[2:]].values, dtype="float32")
+        offset = np.array(offset[offset.columns[2:]].values, dtype="float64")
         pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
-        Y = pheno[pheno.columns[2:]].values.astype("float32")
+        Y = pheno[pheno.columns[2:]].values.astype("float64")
         if not binary:
             Y -= np.mean(Y, axis=0)
             offset -= np.mean(offset, axis=0)
@@ -442,7 +458,7 @@ def get_unadjusted_test_statistics_bgen(
                 snp_on_disk[
                     :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
                 ]
-                .read(dtype="float32", num_threads=num_threads)
+                .read(dtype="float64", num_threads=num_threads)
                 .val
             )
             ## preprocess genotype and perform linear regression

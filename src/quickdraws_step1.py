@@ -99,7 +99,10 @@ parser.add_argument(
 )
 ## hyperparameters arguments
 parser.add_argument(
-    "--num_epochs", help="number of epochs to train for", type=int, default=15
+    "--num_epochs", help="number of epochs to train loco run", type=int, default=30
+)
+parser.add_argument(
+    "--alpha_search_epochs", help="number of epochs to train for alpha search", type=int, default=90
 )
 parser.add_argument(
     "--lr",
