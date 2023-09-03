@@ -167,13 +167,17 @@ def get_test_statistics(
             if binary
             else pd.merge(covareffects, unrel_homo, on=["FID", "IID"])
         )
-        if binary:
-            unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]] = expit(
-                unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]].values
-            )
         unrel_sample_covareffect.to_csv(
             out + ".unrel.covar_effects", sep="\t", index=None
         )
+        if binary:
+            unrel_sample_covareffect_expit = unrel_sample_covareffect
+            unrel_sample_covareffect_expit[unrel_sample_covareffect_expit.columns[2:]] = expit(
+                unrel_sample_covareffect_expit[unrel_sample_covareffect_expit.columns[2:]].values
+            )
+            unrel_sample_covareffect_expit.to_csv(
+                out + ".unrel.expit.covar_effects", sep="\t", index=None
+            )
         unrel_sample_traits = (
             traits if binary else pd.merge(traits, unrel_homo, on=["FID", "IID"])
         )
@@ -188,7 +192,7 @@ def get_test_statistics(
         get_unadjusted_test_statistics(
             bedfile,
             [out + ".unrel.traits"] * len(unique_chrs),
-            [out + ".unrel.covar_effects"] * len(unique_chrs) if binary else None,
+            [out + ".unrel.expit.covar_effects"] * len(unique_chrs) if binary else None,
             covar,
             out + "_lrunrel",
             unique_chrs,
