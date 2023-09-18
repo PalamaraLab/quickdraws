@@ -98,7 +98,8 @@ def calibrate_test_stats(
     sumstats_cur = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
     ## we do this two times because the sumstats_cur could be way off from the sumstats_ref
     overall_correction = 1
-    for _ in range(2):
+    prev_correction = 1
+    for ldsc_iter in range(5):
         mask_dodgy_cur = get_mask_dodgy(
             ldscores[["SNP", "LDSCORE"]], sumstats_cur, np.mean(sumstats_cur["OBS_CT"])
         )
@@ -109,13 +110,25 @@ def calibrate_test_stats(
         correction = (1 - atten_ratio_ref) / (
             intercept_cur - atten_ratio_ref * mean_sumstats_cur
         )
-        if match_yinter:
+        if match_yinter and ldsc_iter < 2:
             correction = intercept_ref / intercept_cur
+        
+        if ldsc_iter == 4 and np.abs(prev_correction - correction) > 0.01:
+            print(pheno + " entering here...")
+            print(prev_correction - correction)
+            print(sumstats_cur)
+            sumstats_cur["CHISQ"] /= overall_correction
+            sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
+            overall_correction = 1  
+            print(sumstats_cur)
+        else:
+            overall_correction *= correction
+            sumstats_cur["CHISQ"] *= correction
+            sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
 
-        overall_correction *= correction
-        sumstats_cur["CHISQ"] *= correction
-        sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
+        prev_correction = correction.copy()
 
+    
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
 
@@ -160,34 +173,17 @@ def get_test_statistics(
 
     if calibrate:
         # Run LR-unRel using our numba implementation
-        unrel_homo = pd.read_csv(unrel_homo_file, names=["FID", "IID"], sep="\s+")
-        covareffects = pd.read_csv(covareffectsfile, sep="\s+")
-        unrel_sample_covareffect = (
-            covareffects
-            if binary
-            else pd.merge(covareffects, unrel_homo, on=["FID", "IID"])
-        )
-        unrel_sample_covareffect.to_csv(
-            out + ".unrel.covar_effects", sep="\t", index=None
-        )
+        unrel_sample_traits, unrel_sample_covareffect, unrel_sample_indices = preprocess_phenotypes(phenofile, covar, bedfile, unrel_homo_file, binary)
+        unrel_sample_indices = unrel_sample_indices.tolist()
+        unrel_sample_covareffect.to_csv(out + ".unrel.covar_effects", sep="\t", index=None)
+        unrel_sample_traits.to_csv(out + ".unrel.traits", sep="\t", index=None)
         if binary:
-            unrel_sample_covareffect_expit = unrel_sample_covareffect
-            unrel_sample_covareffect_expit[unrel_sample_covareffect_expit.columns[2:]] = expit(
-                unrel_sample_covareffect_expit[unrel_sample_covareffect_expit.columns[2:]].values
+            unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]] = expit(
+                unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]].values
             )
-            unrel_sample_covareffect_expit.to_csv(
+            unrel_sample_covareffect.to_csv(
                 out + ".unrel.expit.covar_effects", sep="\t", index=None
             )
-        unrel_sample_traits = (
-            traits if binary else pd.merge(traits, unrel_homo, on=["FID", "IID"])
-        )
-        unrel_sample_traits.to_csv(out + ".unrel.traits", sep="\t", index=None)
-        samples_dict = {}
-        for i, fid in enumerate(snp_on_disk.iid[:, 0]):
-            samples_dict[int(fid)] = i
-        unrel_sample_indices = []
-        for fid in unrel_sample_covareffect.FID:
-            unrel_sample_indices.append(samples_dict[int(fid)])
 
         get_unadjusted_test_statistics(
             bedfile,
@@ -197,8 +193,8 @@ def get_test_statistics(
             out + "_lrunrel",
             unique_chrs,
             num_threads=n_workers,
-            binary=binary,
-            firth=firth,
+            binary=binary, 
+            firth=False, ##caution
             firth_pval_thresh=firth_pval_thresh,
         )
     offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
@@ -211,7 +207,7 @@ def get_test_statistics(
         unique_chrs,
         num_threads=n_workers,
         binary=binary,
-        firth=firth,
+        firth=firth, ##caution
         firth_pval_thresh=firth_pval_thresh,
     )
 

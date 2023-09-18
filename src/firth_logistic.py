@@ -132,7 +132,6 @@ def firth_logit_covars(X, y_all, offset_all, max_iter=1000, max_stepsize=25, tol
     loglike_all = np.zeros(y_all.shape[1])
     iters_all = np.zeros(y_all.shape[1])
     for p in range(y_all.shape[1]):
-        print(p)
         y = y_all[:, p]
         offset = offset_all[:, p]
 

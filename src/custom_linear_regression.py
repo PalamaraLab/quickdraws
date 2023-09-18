@@ -172,11 +172,13 @@ def MyLogRegr(X, Y, W, offset):
 
 
 def firth_parallel(
-    chisq_snp, beta_snp, geno_snp, Y, pred_covars, covars, firth_pval_thresh
+    chisq_snp, beta_snp, freq_snp, geno_snp, Y, pred_covars, covars, firth_pval_thresh
 ):
     chisq_out = chisq_snp.copy()
     beta_out = beta_snp.copy()
-    pheno_mask = chi2.sf(chisq_snp, df=1) < firth_pval_thresh  ### caution
+    is_rare_snp = (freq_snp < 5e-2) | (freq_snp > (1 - 5e-2)) ##caution
+    is_rare_pheno = ((np.nanmean(Y, axis=0) < 5e-2) | (np.nanmean(Y, axis=0) > (1 - 5e-2)))
+    pheno_mask = ((chi2.sf(chisq_snp, df=1) < firth_pval_thresh) & (is_rare_pheno | is_rare_snp))
     beta_firth, se, loglike_diff, iters = firth_logit_svt(
         geno_snp, Y[:, pheno_mask], pred_covars[:, pheno_mask], covars
     )
@@ -218,6 +220,7 @@ def get_unadjusted_test_statistics(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
+    correction=None
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -290,6 +293,11 @@ def get_unadjusted_test_statistics(
                 beta, chisq, afreq = MyLogRegr(X, Y, covars, offset)
             else:
                 beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
+            if correction is not None:
+                print(correction)
+                for p in range(len(chisq)):
+                    chisq[p] *= correction[p]
+
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
             ] = beta
@@ -304,6 +312,7 @@ def get_unadjusted_test_statistics(
                     delayed(firth_parallel)(
                         chisq[:, snp],
                         beta[:, snp],
+                        afreq[snp],
                         X[:, snp : snp + 1],
                         Y,
                         pred_covars_arr[chr_no],
@@ -481,6 +490,7 @@ def get_unadjusted_test_statistics_bgen(
                     delayed(firth_parallel)(
                         chisq[:, snp],
                         beta[:, snp],
+                        afreq[snp],
                         X[:, snp : snp + 1],
                         Y,
                         pred_covars_arr[chr_no],
