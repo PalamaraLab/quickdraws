@@ -153,7 +153,7 @@ class Model(nn.Module):
         spike=None,
     ):
         super(Model, self).__init__()
-        self.fc1 = nn.Linear(dim_in, dim_out)
+        self.fc1 = nn.Linear(dim_in, dim_out, bias=False)
         self.sc1 = BBB_Linear_spike_slab(
             weights_shape=self.fc1.weight.shape,
             num_samples=num_samples,
