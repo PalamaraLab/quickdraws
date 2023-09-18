@@ -13,14 +13,14 @@ from scipy.special import expit
 from sklearn.preprocessing import quantile_transform
 
 
-def preprocess_phenotypes(pheno, covar, bed, removeFile, binary):
+def preprocess_phenotypes(pheno, covar, bed, keepfile, binary):
     snp_on_disk = Bed(bed, count_A1=True)
     samples_geno = [int(x) for x in snp_on_disk.iid[:, 0]]
 
-    if removeFile is not None:
-        remove_samples = pd.read_csv(removeFile, sep="\s+")
-        remove_samples = [int(x) for x in remove_samples[remove_samples.columns[0]]]
-        samples_geno = list(set(samples_geno) - set(remove_samples))
+    if keepfile is not None:
+        keep_samples = pd.read_csv(keepfile, sep="\s+")
+        keep_samples = [int(x) for x in keep_samples[keep_samples.columns[0]]]
+        samples_geno = list(np.intersect1d(samples_geno, keep_samples))
 
     # Phenotype loading and alignment
     Traits = pd.read_csv(pheno, sep="\s+", low_memory=False)
@@ -227,13 +227,13 @@ if __name__ == "__main__":
         type=str,
     )
     parser.add_argument(
-        "--removeFile",
+        "--keepfile",
         "-r",
-        help='file with sample id to remove; should be in "FID,IID" format and tsv',
+        help='file with sample id to keep; should be in "FID,IID" format and tsv',
         type=str,
     )
     args = parser.parse_args()
-    preprocess_phenotypes(args.pheno, args.covar, args.bed, args.removeFile)
+    preprocess_phenotypes(args.pheno, args.covar, args.bed, args.keepfile)
 
 
 """
