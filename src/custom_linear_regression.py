@@ -220,7 +220,6 @@ def get_unadjusted_test_statistics(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
-    correction=None
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -293,10 +292,6 @@ def get_unadjusted_test_statistics(
                 beta, chisq, afreq = MyLogRegr(X, Y, covars, offset)
             else:
                 beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
-            if correction is not None:
-                print(correction)
-                for p in range(len(chisq)):
-                    chisq[p] *= correction[p]
 
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
