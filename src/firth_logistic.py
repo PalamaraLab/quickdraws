@@ -2,7 +2,6 @@ import numpy as np
 from scipy.stats import chi2
 import time
 import pdb
-import numba
 import copy
 
 
@@ -35,7 +34,7 @@ def firth_logit_svt(
 
     ## Regress out covars from X
 
-    for p in numba.prange(y_all.shape[1]):
+    for p in range(y_all.shape[1]):
         y = y_all[:, p]
         offset = offset_all[:, p]
 
