@@ -1009,6 +1009,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         )
 
     np.save(args.output + ".blup", mu * spike)
+    np.save(args.output + ".alpha", np.array(alpha)[np.argmax(output_r2, axis=1)])
 
     del train_dataset.hap1
     del train_dataset.hap2
