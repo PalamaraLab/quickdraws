@@ -88,7 +88,7 @@ parser.add_argument(
     default="src/RHEmcmt",
     help="path to RHE-MC / SCORE binary file",
 )
-parser.add_argument("--output_step0", help="prefix of the hdf5 file", type=str)
+parser.add_argument("--output_step0", help="prefix of the output files from step 0", type=str) ## depreciate
 parser.add_argument("--h2_file", type=str, help="File containing estimated h2")
 parser.add_argument(
     "--h2_grid",

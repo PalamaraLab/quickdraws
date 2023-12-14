@@ -24,6 +24,7 @@ from ldscore_calibration import calc_ldscore_chip, ldscore_intercept, get_mask_d
 from custom_linear_regression import (
     get_unadjusted_test_statistics,
     get_unadjusted_test_statistics_bgen,
+    preprocess_covars
 )
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import pdb
@@ -170,6 +171,38 @@ def get_test_statistics(
         delayed(rename_columns)(offset + str(C) + ".offsets", pheno_columns)
         for C in unique_chrs
     )
+
+    ## Check if there is complete seperation for some traits and remove them
+    if binary:
+        pheno_mask = np.zeros(len(pheno_columns[2:]))
+        W = preprocess_covars(covar, traits[['FID','IID']])
+        for chr in unique_chrs:
+            offset_df = pd.read_csv(offset + str(chr) + ".offsets", sep="\s+")
+            for p, p_name in enumerate(pheno_columns[2:]):
+                if binary:
+                    try:
+                        offset_p = offset_df[p_name].values         
+                        np.linalg.inv((W.T * offset_p * (1 - offset_p))@W)
+                        pheno_mask[p] += 1
+                    except:
+                        continue
+                else:
+                    pheno_mask[p] += 1
+        
+        pheno_mask = pheno_mask == len(unique_chrs)
+        pdb.set_trace()
+        pheno_columns = ['FID','IID'] + (np.array(pheno_columns[2:])[pheno_mask].tolist())
+        if not pheno_mask.all():
+            print("Removed traits with complete case-control seperation, updated pheno list = " + str(pheno_columns))
+
+        traits[pheno_columns].to_csv(phenofile, sep = '\t', index=None, na_rep='NA')
+        covar_effects = pd.read_csv(
+            phenofile.split(".traits")[0] + ".covar_effects", sep="\s+"
+        )
+        covar_effects[pheno_columns].to_csv(phenofile.split(".traits")[0] + ".covar_effects", sep = '\t', index=None, na_rep='NA')
+        for chr in unique_chrs:
+            offset_df = pd.read_csv(offset + str(chr) + ".offsets", sep="\s+")
+            offset_df[pheno_columns].to_csv(offset + str(chr) + ".offsets", sep ='\t', index=None, na_rep='NA')
 
     if calibrate:
         # Run LR-unRel using our numba implementation
