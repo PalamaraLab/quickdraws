@@ -13,7 +13,7 @@ from scipy.special import expit
 from sklearn.preprocessing import quantile_transform
 
 
-def preprocess_phenotypes(pheno, covar, bed, keepfile, binary):
+def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 1.0):
     snp_on_disk = Bed(bed, count_A1=True)
     samples_geno = [int(x) for x in snp_on_disk.iid[:, 0]]
 
@@ -29,9 +29,6 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary):
     Traits = Traits.dropna(subset=[Traits.columns[0]])
     N_phen = Traits.shape[1] - 2  # exclude FID, IID
 
-    if N_phen > 50:
-        raise "RHE doesn't work for more than 50 phenotypes at once, try supplying atmost 50 phenotypes at once"
-
     print("{0} phenotypes were loaded for {1} samples.".format(N_phen, Traits.shape[0]))
     # remove those without genotypes
     Traits = Traits.drop(
@@ -40,7 +37,6 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary):
     )
     Traits.reindex(sorted(Traits.columns), axis=1)
     # check if any individual is less than 50% phenotyped
-    phen_thres = 0.50
     samples_with_missing = np.where(Traits.isna().sum(axis=1) / N_phen > phen_thres)[0]
     print(
         "{0} samples are less than {1}% phenotyped and will be excluded.".format(
@@ -109,7 +105,7 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary):
             N_total,
         )
         W = np.concatenate(
-            [merged_df[covar_columns].to_numpy(), np.ones((N_total, 1))], axis=1
+            [merged_df[covar_columns].to_numpy()[:, np.std(merged_df[covar_columns].to_numpy(), axis=0) > 0], np.ones((N_total, 1))], axis=1
         )
         for col in trait_columns:
             Trait = merged_df[col]

@@ -137,6 +137,7 @@ def runRHE(
     covariates=None,
     out="out",
     binary=False,
+    random_vectors=50,
 ):
     """
     A wrapper that prepares a file with SNP annotations (if needed), runs RHE on the background,
@@ -198,7 +199,7 @@ def runRHE(
             covariates_df = pd.merge(covariates_df, pheno_df)[covar_df_cols]
             covariates_df.to_csv(covariates + ".rhe", sep="\t", index=None, na_rep="NA")
             cmd += " -c " + covariates + ".rhe"
-        cmd += " -k 50 -jn 10 > " + savelog
+        cmd += " -k " + str(random_vectors) + " -jn 10 > " + savelog
         print("Invoking RHE as", cmd)
         _ = subprocess.run(cmd, shell=True)
 
@@ -215,6 +216,8 @@ def runRHE(
         VC = np.array(VC[0:N_phen])  # take first N_phen rows
 
         VC = np.sum(VC[:, :-1], axis=1) / np.sum(VC, axis=1)
+        VC[VC <= 0] = 1e-2
+        VC[VC >= 1] = (1 - 1e-2)
 
         if binary:
             ## transform heritability from observed scale to liability scale

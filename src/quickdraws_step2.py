@@ -190,7 +190,6 @@ def get_test_statistics(
                     pheno_mask[p] += 1
         
         pheno_mask = pheno_mask == len(unique_chrs)
-        pdb.set_trace()
         pheno_columns = ['FID','IID'] + (np.array(pheno_columns[2:])[pheno_mask].tolist())
         if not pheno_mask.all():
             print("Removed traits with complete case-control seperation, updated pheno list = " + str(pheno_columns))
@@ -331,6 +330,35 @@ def get_test_statistics_bgen(
             )
             for C in unique_chrs
         )
+
+    #### CAUTION -- running LR unrel ######
+    # for c in unique_chrs:
+    #     pheno = pd.read_csv(phenofile + str(unique_chrs) + ".preprocessed",'\t')
+    #     unrel_homo = pd.read_csv('unrelated_White_British.FID_IID.txt','\s+', header=None)
+    #     unrel_homo = unrel_homo.rename(columns={0:'FID',1:'IID'})
+    #     pheno_unrel = pd.merge(pheno, unrel_homo, on=['FID','IID'])
+    #     print(pheno_unrel.shape)
+    #     pheno_unrel.to_csv(phenofile + str(unique_chrs) + ".unrel.preprocessed", sep="\t", index=None)
+    
+    # get_unadjusted_test_statistics_bgen(
+    #     bgenfile,
+    #     samplefile,
+    #     [phenofile + str(unique_chrs) + ".unrel.preprocessed"] * len(unique_chrs),
+    #     None,
+    #     covar,
+    #     out + "_lrunrel",
+    #     unique_chrs,
+    #     extractFile,
+    #     num_threads=n_workers,
+    #     binary=False,
+    #     firth=False,
+    #     firth_pval_thresh=firth_pval_thresh
+    # )
+    # Parallel(n_jobs=n_workers)(
+    #     delayed(adjust_test_stats)(out + "_lrunrel", pheno, correction)
+    #     for (pheno, correction) in zip(pheno_columns[2:], np.ones(len(pheno_columns[2:])))
+    # )
+    ###########################################
 
     get_unadjusted_test_statistics_bgen(
         bgenfile,

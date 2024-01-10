@@ -193,6 +193,7 @@ class HDF5Dataset:
         phen_col: str,
         transform: Optional[Callable] = None,
         train_split=0.8,
+        lowmem=False,
     ):
         ### Assumes the HDF5 dataset is already randomly shuffled
         ### Assumes the HDF5 dataset has genotype_covar_effect and std_genotype computed
@@ -202,69 +203,68 @@ class HDF5Dataset:
         self.split = split
         self.filename = filename
         self.transform = transform
-        h5py_file = h5py.File(self.filename, "r")
-        assert h5py_file["hap1"].shape == h5py_file["hap2"].shape
-        total_samples = len(h5py_file["hap1"])
+        self.h5py_file = h5py.File(self.filename, "r")
+        assert self.h5py_file["hap1"].shape == self.h5py_file["hap2"].shape
+        total_samples = len(self.h5py_file["hap1"])
         train_samples = int(train_split * total_samples)
 
         if split == "train":
-            self.hap1 = np.array(h5py_file["hap1"][0:train_samples])
-            self.hap2 = np.array(h5py_file["hap2"][0:train_samples])
+            if not lowmem:
+                self.hap1 = np.array(self.h5py_file["hap1"][0:train_samples])
+                self.hap2 = np.array(self.h5py_file["hap2"][0:train_samples])
+            else:
+                self.hap1 = self.h5py_file["hap1"]
+                self.hap2 = self.h5py_file["hap2"]
             self.output = torch.as_tensor(
-                np.array(h5py_file[phen_col][0:train_samples], dtype=float)
+                np.array(self.h5py_file[phen_col][0:train_samples], dtype=float)
             ).float()
             self.covar_effect = torch.as_tensor(
-                np.array(h5py_file["covar_effect"][0:train_samples], dtype=float)
+                np.array(self.h5py_file["covar_effect"][0:train_samples], dtype=float)
             ).float()
+            self.covars = torch.as_tensor(np.array(self.h5py_file["covars"])[0:train_samples]).float()
         elif split == "test":
-            self.hap1 = np.array(h5py_file["hap1"][train_samples:])
-            self.hap2 = np.array(h5py_file["hap2"][train_samples:])
+            ### No lowmem in testing, can just reduce train_split or test at the end
+            self.hap1 = np.array(self.h5py_file["hap1"][train_samples:])
+            self.hap2 = np.array(self.h5py_file["hap2"][train_samples:])
             self.output = torch.as_tensor(
-                np.array(h5py_file[phen_col][train_samples:], dtype=float)
+                np.array(self.h5py_file[phen_col][train_samples:], dtype=float)
             ).float()
             self.covar_effect = torch.as_tensor(
-                np.array(h5py_file["covar_effect"][train_samples:], dtype=float)
+                np.array(self.h5py_file["covar_effect"][train_samples:], dtype=float)
             ).float()
+            self.covars = torch.as_tensor(np.array(self.h5py_file["covars"])[train_samples:]).float()
         else:
-            self.hap1, self.hap2 = h5py_file["hap1"][:], h5py_file["hap2"][:]
+            if not lowmem:
+                self.hap1, self.hap2 = self.h5py_file["hap1"][:], self.h5py_file["hap2"][:]
+            else:
+                self.hap1, self.hap2 = self.h5py_file["hap1"], self.h5py_file["hap2"]
             self.output = torch.as_tensor(
-                np.array(h5py_file[phen_col][:], dtype=float)
+                np.array(self.h5py_file[phen_col][:], dtype=float)
             ).float()
             self.covar_effect = torch.as_tensor(
-                np.array(h5py_file["covar_effect"][:], dtype=float)
+                np.array(self.h5py_file["covar_effect"][:], dtype=float)
             ).float()
+            self.covars = torch.as_tensor(np.array(self.h5py_file["covars"])).float()
 
-        # self.output = self.output[:, 1]  ## 1 phenotype
-        # self.output = self.output[:, 1:11]  ## 10 phenotypes
-        # self.output = torch.tile(self.output[:, 1:], (1, 2))[:, 0:50]  ## 50 phenotypes
-        # self.output = torch.tile(self.output[:, 1:], (1, 4))[
-        #     :, 0:100
-        # ]  ## 100 phenotypes
-        # self.output = torch.tile(self.output[:, 1:], (1, 8))[
-        #     :, 0:200
-        # ]  ## 200 phenotypes
-
-        # self.output = self.output[:, 1:6]  ##fixing it to only 1st phenotype
-        self.std_genotype = np.maximum(np.array(h5py_file["std_genotype"]), 1e-6)
+        self.std_genotype = np.maximum(np.array(self.h5py_file["std_genotype"]), 1e-6)
         self.geno_covar_effect = torch.as_tensor(
-            np.array(h5py_file["geno_covar_effect"])
+            np.array(self.h5py_file["geno_covar_effect"])
         ).float()
-        self.covars = torch.as_tensor(np.array(h5py_file["covars"])).float()
         self.num_snps = len(self.std_genotype)
-        self.chr = torch.as_tensor(np.array(h5py_file["chr"])).float()
-        self.iid = np.array(h5py_file["iid"], dtype=int)
-        ### Using the mean and std genotype calculated on entire dataset, doesn't change the results
+        self.chr = torch.as_tensor(np.array(self.h5py_file["chr"])).float()
+        self.iid = np.array(self.h5py_file["iid"], dtype=int)
         self.length = len(self.output)
-        h5py_file.close()
+        if not lowmem:
+            self.h5py_file.close()
 
         if self.output.ndim == 1:
             self.output = self.output.reshape(-1, 1)
 
+    def close_hdf5(self):
+        self.h5py_file.close()
+    
     def __getitem__(self, index: int) -> Any:
-        input = (
-            torch.as_tensor(np.unpackbits(self.hap1[index])).float()
-            + torch.as_tensor(np.unpackbits(self.hap2[index])).float()
-        )
+        input = torch.as_tensor(np.unpackbits(self.hap1[index]) + np.unpackbits(self.hap2[index])).float()
         input = input[0 : self.num_snps] - self.covars[index] @ self.geno_covar_effect
         output = self.output[index]
         covar_effect = self.covar_effect[index]
@@ -309,6 +309,8 @@ class Trainer:
         self.never_validate = validate_every < 0
         self.chr_map = chr_map
         self.alpha = alpha
+        self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().cuda()**2
+        print(self.var_covar_effect)
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map)
             self.num_chr = len(self.unique_chr_map)
@@ -331,9 +333,7 @@ class Trainer:
             self.optimizer_list.append(
                 bnb.optim.Adam(
                     model.parameters(),
-                    lr=lr[model_no // self.num_chr]
-                    if len(lr) != len(model_list)
-                    else lr[model_no],
+                    lr=lr[model_no],
                     eps=adam_eps,
                     weight_decay=weight_decay,
                     betas=(0.9, 0.995),
@@ -629,6 +629,7 @@ class Trainer:
             mask = ~(torch.isnan(label).all(axis=1))  ## remove samples with all nans
             input, covar_effect, label = input[mask], covar_effect[mask], label[mask]
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
+            var_covar_effect = self.var_covar_effect.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
             covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
             mse_loss_arr = []
@@ -636,7 +637,7 @@ class Trainer:
             total_loss_arr = []
             for model_no, model in enumerate(self.model_list):
                 preds, reg_loss = model(input, covar_effect_4x, binary=self.args.binary)
-                mse_loss = self.loss_func(preds, label_4x, h2)
+                mse_loss = self.loss_func(preds, label_4x, h2*(1-var_covar_effect)+var_covar_effect)
                 for k in range(self.args.forward_passes - 1):
                     preds, _ = model(
                         input,
@@ -644,7 +645,7 @@ class Trainer:
                         only_output=True,
                         binary=self.args.binary,
                     )
-                    mse1 = self.loss_func(preds, label_4x, h2)
+                    mse1 = self.loss_func(preds, label_4x, h2*(1-var_covar_effect)+var_covar_effect)
                     mse_loss = mse_loss + mse1
                 mse_loss = (
                     mse_loss / 2 / self.args.forward_passes
@@ -722,6 +723,7 @@ class Trainer:
             mask = ~(torch.isnan(label).all(axis=1))  ## remove samples with all nans
             input, covar_effect, label = input[mask], covar_effect[mask], label[mask]
             h2 = self.h2.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
+            var_covar_effect = self.var_covar_effect.unsqueeze(0).unsqueeze(0).repeat(2, label.shape[0], 1)
             label_4x = label.unsqueeze(0).repeat(2, 1, 1)
             covar_effect_4x = covar_effect.unsqueeze(0).repeat(2, 1, 1)
             for model_no, model in enumerate(self.model_list):
@@ -741,7 +743,7 @@ class Trainer:
                 mse_loss = self.loss_func(
                     preds,
                     label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
-                    h2[:, :, self.pheno_for_model[model_no // self.num_chr]],
+                    h2[:, :, self.pheno_for_model[model_no // self.num_chr]]*(1-var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]])+var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]],
                 )
                 loss = 0.5 * mse_loss + reg_loss
 
@@ -783,7 +785,7 @@ def initialize_model(
         std_genotype = std_genotype.unsqueeze(0)
         std_y = std_y.unsqueeze(1)
 
-    std_y = 1
+    # std_y = 1 ## CAUTION!!!
     for alpha_no, alpha in enumerate(alpha_list):
         if h2.ndim == 1:
             prior_sig = math.sqrt(1 / len(std_genotype) / alpha) / std_genotype
@@ -866,7 +868,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     print("Done loading in: " + str(time.time() - start_time) + " secs")
     # Define model and enable wandb live policy
     std_genotype = torch.as_tensor(train_dataset.std_genotype).float()
-    std_y = torch.std(train_dataset.output, axis=0).float()
+    std_y = torch.sqrt(1 - torch.std(train_dataset.covar_effect, axis=0).float()**2)
     h2 = torch.as_tensor(h2).float()
 
     model_list = initialize_model(
@@ -949,6 +951,10 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     with torch.no_grad():
         torch.cuda.empty_cache()
 
+    if args.lowmem:
+        train_dataset.close_hdf5()
+        test_dataset.close_hdf5()
+
     return -output_loss, mu_list, spike_list
 
 
@@ -970,12 +976,19 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## hard-coding alpha values as in BOLT
     alpha = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
+
+    assert len(alpha) == len(args.lr), "Length of sparsity parameters should be equal to learning rates provided"
+    lr_dict = {}
+    for a, l in zip(alpha, args.lr):
+        lr_dict[a] = l
+
     train_dataset = HDF5Dataset(
         split="train",
         filename=hdf5_filename,
         phen_col="phenotype",
         transform=None,
         train_split=args.train_split,
+        lowmem=args.lowmem
     )
     test_dataset = HDF5Dataset(
         split="test",
@@ -983,6 +996,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         phen_col="phenotype",
         transform=None,
         train_split=args.train_split,
+        lowmem=args.lowmem
     )
 
     if args.h2_grid:
@@ -1049,12 +1063,14 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         phen_col="phenotype",
         transform=None,
         train_split=args.train_split,
+        lowmem=args.lowmem
     )
     print("Done loading in: " + str(time.time() - start_time) + " secs")
     std_genotype = torch.as_tensor(
         full_dataset.std_genotype, dtype=torch.float32
     )  # .to(device)
-    std_y = torch.std(full_dataset.output, axis=0)  # .to(device)
+    # std_y = torch.std(full_dataset.output, axis=0)  # .to(device)
+    std_y = torch.sqrt(1 - torch.std(full_dataset.covar_effect, axis=0).float()**2)
     h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
     chr_map = full_dataset.chr  # .to(device)
     model_list = initialize_model(
@@ -1079,6 +1095,12 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     print("Calculating estimates using entire dataset..")
     start_time = time.time()
+    lr_loco = []
+    for a in alpha:
+        for chr_no in range(len(torch.unique(chr_map))):
+            lr_loco.append(lr_dict[a])
+
+    print(lr_loco)    
     trainer = Trainer(
         args,
         alpha,
@@ -1086,18 +1108,14 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         full_dataset,
         full_dataset,
         model_list,
-        lr=args.lr,
+        lr=lr_loco,
         device=device,
         validate_every=-1,
         chr_map=chr_map.to(device),
         pheno_for_model=pheno_for_model,
     )
-    if args.loco == "approx":
-        for epoch in tqdm(range(args.num_epochs)):
-            _ = trainer.train_epoch(epoch)
-    else:
-        for epoch in tqdm(range(args.num_epochs)):
-            _ = trainer.train_epoch_loco(epoch)
+    for epoch in tqdm(range(args.num_epochs)):
+        _ = trainer.train_epoch_loco(epoch)
 
     ## Calculate estimates
 
@@ -1141,6 +1159,8 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     print("Done saving the model in: " + str(time.time() - start_time) + " secs")
     wandb.finish()
     print("Total time elapsed: " + str(time.time() - overall_start_time) + " secs")
+    if args.lowmem:
+        full_dataset.close_hdf5()
 
 
 if __name__ == "__main__":
@@ -1186,9 +1206,9 @@ if __name__ == "__main__":
         default=[
             4e-4,
             2e-4,
-            5e-5,
+            2e-4,
+            1e-4,
             2e-5,
-            1e-5,
             5e-6,
         ],
     )

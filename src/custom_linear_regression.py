@@ -26,6 +26,7 @@ def preprocess_covars(covarFile, iid_fid):
     covars = covars.fillna(covars.median())
     covars = covars[covars.columns[2:]]
     # covars = (covars - covars.min(axis=0)) / (covars.max(axis=0) - covars.min(axis=0))
+    covars = covars.loc[:, covars.std() > 0]
     covars["ALL_CONST"] = 1
     covars = np.array(covars.values, dtype="float32")
     return covars
@@ -390,12 +391,12 @@ def get_unadjusted_test_statistics_bgen(
 
         del snp_dict
 
-    offset = pd.read_csv(offsetFileList[0], sep="\s+")
+    pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     samples_dict = {}
     for i, fid in enumerate(fid_iid[:, 0]):
         samples_dict[int(fid)] = i
     sample_indices = []
-    for fid in offset.FID:
+    for fid in pheno.FID:
         sample_indices.append(samples_dict[int(fid)])
     iid_fid_in_bgen = fid_iid[sample_indices]
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
@@ -409,23 +410,23 @@ def get_unadjusted_test_statistics_bgen(
     ## calculate batch_size based on max_memory
     ## extra divide by 3 because bgen files give a distrution data as output (aa, Aa, AA)
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0])
-    beta_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
-    chisq_arr = np.zeros((offset.shape[1] - 2, len(chr_map)), dtype="float32")
+    beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
+    chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
 
     print("Running linear/logistic regression to get association")
 
-    covar_effects = pd.read_csv(
-        phenoFileList[0].split(".traits")[0]
-        + ".covar_effects"
-        + phenoFileList[0].split(".traits")[1],
-        sep="\s+",
-    )
-    covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
     pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
 
     if binary and firth and firth_null is None:
+        covar_effects = pd.read_csv(
+            phenoFileList[0].split(".traits")[0]
+            + ".covar_effects"
+            + phenoFileList[0].split(".traits")[1],
+            sep="\s+",
+        )
+        covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
         pred_covars_arr = Parallel(n_jobs=num_threads)(
             delayed(firth_null_parallel)(
                 offsetFileList[chr_no], Y, covar_effects, covars
@@ -446,13 +447,17 @@ def get_unadjusted_test_statistics_bgen(
     prev = 0
     for chr_no, chr in enumerate(unique_chrs):
         ## read offset file and adjust phenotype file
-        offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
-        offset = np.array(offset[offset.columns[2:]].values, dtype="float32")
+        try:
+            offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
+            offset = np.array(offset[offset.columns[2:]].values, dtype="float32")
+        except:
+            offset = None
+
         pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
         Y = pheno[pheno.columns[2:]].values.astype("float32")
-        if not binary:
-            Y -= np.mean(Y, axis=0)
-            offset -= np.mean(offset, axis=0)
+        # if not binary:
+        #     Y -= np.mean(Y, axis=0)
+        #     offset -= np.mean(offset, axis=0)
 
         num_snps_in_chr = int(np.sum(chr_map == int(chr)))
         for batch in tqdm(range(0, num_snps_in_chr, batch_size)):
@@ -506,7 +511,7 @@ def get_unadjusted_test_statistics_bgen(
 
     write_sumstats_file_bgen(
         snp_on_disk,
-        pd.read_csv(offsetFileList[chr_no], sep="\s+").columns[2:],
+        pheno.columns[2:],
         snp_on_disk.shape[0],
         afreq_arr,
         beta_arr,

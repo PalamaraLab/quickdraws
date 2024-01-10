@@ -114,8 +114,8 @@ parser.add_argument(
         2e-4,
         2e-4,
         1e-4,
-        5e-5,
-        1e-5,
+        2e-5,
+        5e-6,
     ],  ##changed from [4e-4, 4e-4, 2e-4, 2e-4, 5e-5, 2e-5]
 )
 # parser.add_argument(
@@ -166,6 +166,19 @@ parser.add_argument(
     action="store_const",
     const=True,
     default=False,
+)
+parser.add_argument(
+    "--lowmem",
+    help="Enable low memory version",
+    action="store_const",
+    const=True,
+    default=False,
+)
+parser.add_argument(
+    "--rhe_random_vectors",
+    help="Number of random vectors in RHE MC",
+    type=int,
+    default=50
 )
 
 ## wandb arguments
@@ -227,6 +240,7 @@ if args.h2_file is None and not args.h2_grid:
         args.covar,
         args.output,
         args.binary,
+        args.rhe_random_vectors,
     )
     print("Done in " + str(time.time() - st) + " secs")
 elif args.h2_file is not None:

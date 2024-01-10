@@ -22,6 +22,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
         df_covar,
         on=["FID"],
     )
+    df_covar = df_covar.loc[:, df_covar.std() > 0]
     df_covar["ALL_CONST"] = 1
     df_covar = df_covar.fillna(df_covar.median())
     covars = df_covar[df_covar.columns[2:]].values
@@ -45,10 +46,13 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
         geno_covar_effect[:, i : min(i + chunk_size, snp_on_disk.shape[1])] = K @ temp
         xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] = np.array(
             [
-                x[:, v].dot(x[:, v]) - temp[:, v].dot(K.dot(temp[:, v]))
+                x[:, v].dot(x[:, v]) - temp[:, v].dot(K.dot(temp[:, v])) #### CAUTION!!!
                 for v in range(x.shape[1])
             ]
         )
+        if (xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] < 0).any():
+            print("Check if covariates are independent, the covariate linear regression might be unstable...")
+            pdb.set_trace() 
     return covars, geno_covar_effect, np.sqrt(xtx / len(sample_indices))
 
 
@@ -59,11 +63,13 @@ def convert_to_hdf5(
     out="out",
     snps_to_keep_filename=None,
     chunk_size=4096,
+    train_split = 0.8,
+    binary=False
 ):
     ## pheno is the adjusted pheno
     ## sample_indices come from the preprocess_phenotypes
     ## snps_to_keep is a list of SNPs to be included in the analysis
-    h1 = h5py.File(out + ".hdf5", "w")
+    h1 = h5py.File(out + ".hdf5", 'w') ###caution
 
     ## handle phenotypes here
     pheno = pd.read_csv(out + ".traits", sep="\s+")
@@ -87,10 +93,10 @@ def convert_to_hdf5(
         for snp in snps_to_keep:
             snp_mask[snp_dict[snp]] = True
 
+
     covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
         bed, sample_indices, covars, snp_mask, chunk_size=4096
     )
-
     # save the chromosome information
     _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
 
@@ -102,18 +108,20 @@ def convert_to_hdf5(
     y = pheno[pheno.columns[2:]].values
     z = covareffect[covareffect.columns[2:]].values
     ## handle genotypes here
+
+    ## caution: removed compression
     dset1 = h1.create_dataset(
         "hap1",
         (total_samples, int(np.ceil(total_snps / 8))),
         chunks=(chunk_size, int(np.ceil(total_snps / 8))),
-        compression="gzip",
+        # compression="gzip",
         dtype=np.uint8,
     )
     dset2 = h1.create_dataset(
         "hap2",
         (total_samples, int(np.ceil(total_snps / 8))),
         chunks=(chunk_size, int(np.ceil(total_snps / 8))),
-        compression="gzip",
+        # compression="gzip",
         dtype=np.uint8,
     )
     dset3 = h1.create_dataset("phenotype", data=y, dtype=float)
