@@ -25,7 +25,8 @@ from joblib import Parallel, delayed
 import bitsandbytes as bnb
 import gc
 import pdb
-
+import logging
+logger = logging.getLogger(__name__)
 
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
@@ -56,12 +57,6 @@ class BBB_Linear_spike_slab(nn.Module):
         sig1 = torch.clamp(F.relu(self.sigma1), min=eps)
         weight_mu = mu1.weight
         spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
-        # weight = self.reparameterize(weight_mu, sig1, weight_mu.device, test)
-        # if test:
-        #     out = F.linear(x, weight)
-        # else:
-        #     weight = weight.permute(0, 2, 1)
-        #     out = torch.matmul(x.unsqueeze(0).repeat(4, 1, 1), weight)  ## 2xBxO
         out = self.local_reparameterize(
             x, spike, weight_mu, sig1, weight_mu.device, test
         )
@@ -124,8 +119,6 @@ class BBB_Linear_spike_slab(nn.Module):
         var_preactivations = (
             spike.mul(sig1.pow(2)) + spike.mul(mu1.pow(2)) - mean_preactivations.pow(2)
         )
-        # eps = torch.cuda.FloatTensor((x.shape[0], mu1.shape[0]))
-        # torch.randn((x.shape[0], mu1.shape[0]), out=eps)
         eps = torch.cuda.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
         selection = torch.stack(
             (
@@ -162,13 +155,13 @@ class Model(nn.Module):
             mu1=self.fc1,
         )
         if posterior_sig is not None:
-            print("Setting posterior sigma to CAVI derived sigmas")
+            # logging.info("Setting posterior sigma to CAVI derived sigmas")
             self.sc1.sigma1 = nn.Parameter(posterior_sig, requires_grad=True)
         if mu is not None:
-            print("Initializing posterior means through transfer learning")
+            # logging.info("Initializing posterior means through transfer learning")
             self.fc1.weight.data = mu.to(self.fc1.weight.device)
         if spike is not None:
-            print("Initializing posterior spike through transfer learning")
+            # logging.info("Initializing posterior spike through transfer learning")
             self.sc1.spike1.data = spike.to(self.sc1.spike1.device)
 
     def forward(self, x, offset, only_output=False, test=False, binary=False):
@@ -182,9 +175,6 @@ class Model(nn.Module):
         ## caution
 
 
-## Dataloader class - efficient access of the data:
-# Idea: In case the HDF5 file can't be entirely opened in RAM, use multiple HDF5 files and load one after another
-# Idea: PBWT the input haplotype matrix, in the inverse PBWT at __getitem__
 class HDF5Dataset:
     def __init__(
         self,
@@ -195,9 +185,6 @@ class HDF5Dataset:
         train_split=0.8,
         lowmem=False,
     ):
-        ### Assumes the HDF5 dataset is already randomly shuffled
-        ### Assumes the HDF5 dataset has genotype_covar_effect and std_genotype computed
-
         if split not in ["train", "test", "both"]:
             raise ValueError("Invalid value for split argument")
         self.split = split
@@ -310,7 +297,6 @@ class Trainer:
         self.chr_map = chr_map
         self.alpha = alpha
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().cuda()**2
-        print(self.var_covar_effect)
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map)
             self.num_chr = len(self.unique_chr_map)
@@ -387,12 +373,6 @@ class Trainer:
             sq_error = sq_error
         return torch.sum(sq_error)  ## reduction = sun
 
-    # def masked_mse_loss(self, preds, labels, h2=0.5):
-    #     mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
-    #     loss = self.mse_loss(labels, preds) / (2 * (1 - h2))
-    #     loss = (loss[mask]).sum()
-    #     return loss
-
     def validation(self):
         labels_arr = [[] for _ in range(len(self.model_list))]
         preds_arr = [[] for _ in range(len(self.model_list))]
@@ -465,117 +445,6 @@ class Trainer:
                 ] = test_loss_anc.cpu().numpy() / len(preds_arr[model_no])
         return log_dict
 
-    def save_estimates(self, best_alpha, out=None):
-        ## Saves the estimates (\beta x) for the entire dataset in a text file
-        ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
-        test_loss, preds_arr, labels_arr = self.validation()
-        estimates = np.zeros((preds_arr.shape[1], preds_arr.shape[2]))
-        for prs_no in range(preds_arr.shape[2]):
-            if self.args.binary:
-                estimates[:, prs_no] = torch.logit(
-                    preds_arr[best_alpha[prs_no], :, prs_no]
-                )
-            else:
-                estimates[:, prs_no] = preds_arr[best_alpha[prs_no], :, prs_no]
-        if out is not None:
-            pd.DataFrame(estimates).to_csv(out + ".offsets", sep="\t")
-        else:
-            return estimates
-
-    def save_blup_estimates(self, best_alpha, out=None):
-        ## Saves the BLUP estimates \beta trained in a text file
-        ## Add chromosome, position, allele's etc. later
-        dim_out, dim_in = self.model_list[0].fc1.weight.shape
-        beta = np.zeros((dim_in, dim_out))
-        for prs_no in range(dim_out):
-            spike = torch.clamp(
-                self.model_list[best_alpha[prs_no]].sc1.spike1[prs_no], 1e-6, 1.0 - 1e-6
-            )
-            mu = self.model_list[best_alpha[prs_no]].fc1.weight[prs_no]
-            beta[:, prs_no] = spike.mul(mu).detach().cpu().numpy()
-        if out is not None:
-            pd.DataFrame(beta).to_csv(out + ".blup", sep="\t")
-        else:
-            return beta
-
-    def save_approx_blup_estimates(self, best_alpha, out):
-        ## Saves the approximate LOCO estimates for the entire dataset in a text file
-        ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
-        dim_out, dim_in = self.model_list[0].fc1.weight.shape
-        loco_estimates = np.zeros(
-            (len(torch.unique(self.chr_map)), self.num_samples, dim_out)
-        )
-        all_chr_estimates = self.save_estimates(best_alpha)
-
-        with torch.no_grad():
-            beta = torch.zeros((dim_in, dim_out), device="cuda")
-            for prs_no in range(dim_out):
-                spike = torch.clamp(
-                    self.model_list[best_alpha[prs_no]].sc1.spike1[prs_no],
-                    1e-6,
-                    1.0 - 1e-6,
-                )
-                mu = self.model_list[best_alpha[prs_no]].fc1.weight[prs_no]
-                beta[:, prs_no] = spike.mul(mu)
-
-            assert len(beta) == len(self.chr_map)
-            prev = 0
-            for input, covar_effect, label in self.test_dataloader:
-                input = input.to(self.device)
-                for chr_no, chr in enumerate(torch.unique(self.chr_map)):
-                    ### zero the betas for other chromosome
-                    beta_c = beta[self.chr_map == chr]
-                    beta_c = beta_c.float()
-                    preds = (input[:, self.chr_map == chr]) @ beta_c + covar_effect
-                    if self.args.binary:
-                        loco_estimates[
-                            chr_no, prev : prev + len(input)
-                        ] = torch.sigmoid(
-                            all_chr_estimates[prev : prev + len(input)]
-                            - preds.detach().cpu().numpy()
-                        )
-                    else:
-                        loco_estimates[chr_no, prev : prev + len(input)] = (
-                            all_chr_estimates[prev : prev + len(input)]
-                            - preds.detach().cpu().numpy()
-                        )
-                prev += len(input)
-            for chr_no, chr in enumerate(torch.unique(self.chr_map)):
-                pd.DataFrame(loco_estimates[chr_no]).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t"
-                )
-
-    def save_variational_parameters(self, best_alpha, out):
-        ## Saves the mu and spike varational paramters
-        mu = []
-        psi = []
-
-        for chr_no, c in enumerate(torch.unique(self.chr_map)):
-            mu.append(np.zeros((len(self.h2), int(torch.sum(self.chr_map != c)))))
-            psi.append(np.zeros((len(self.h2), int(torch.sum(self.chr_map != c)))))
-
-        with torch.no_grad():
-            for model_no, model in enumerate(self.model_list):
-                chr_no = model_no % self.num_chr
-                phen_no = self.pheno_for_model[model_no // self.num_chr]
-                mu[chr_no][phen_no] = model.fc1.weight.detach().cpu().numpy()
-                psi[chr_no][phen_no] = (
-                    1
-                    - torch.clamp(model.sc1.spike1, 1e-6, 1.0 - 1e-6)
-                    .detach()
-                    .cpu()
-                    .numpy()
-                )
-
-            for chr_no, chr in enumerate(torch.unique(self.chr_map)):
-                pd.DataFrame(np.array(mu[chr_no])).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".mu", sep="\t"
-                )
-                pd.DataFrame(np.array(psi[chr_no])).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".psi", sep="\t"
-                )
-            np.savetxt(out + ".alpha", self.alpha[best_alpha])
-
     def save_exact_blup_estimates(self, best_alpha, out):
         ## Saves the exact LOCO estimates for the entire dataset in a text file
         ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
@@ -598,6 +467,7 @@ class Trainer:
                     preds = (input[:, self.chr_map != self.unique_chr_map[chr_no]]) @ (
                         beta.T
                     )
+                    ## caution: remove sigmoid to save in regenie format
                     if self.args.binary:
                         loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = (
                             torch.sigmoid(preds + covar_effect[:, phen_no])
@@ -610,12 +480,22 @@ class Trainer:
                             (covar_effect[:, phen_no] + preds).detach().cpu().numpy()
                         )
                 prev += len(input)
-            for chr_no, chr in enumerate(torch.unique(self.chr_map)):
+            
+            # for chr_no, chr in enumerate(torch.unique(self.chr_map)):
+            #     df_concat = pd.concat(
+            #         [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no])], axis=1
+            #     )
+            #     pd.DataFrame(df_concat).to_csv(
+            #         out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
+            #     )
+            
+            ### Saving it Regenie style...
+            for d in range(dim_out):
                 df_concat = pd.concat(
-                    [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no])], axis=1
+                    [self.df_iid_fid, pd.DataFrame(loco_estimates[:,:, d])], axis=0
                 )
                 pd.DataFrame(df_concat).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
+                    out + "_" + str(d) + ".loco", sep=" ", index=None
                 )
 
     def train_epoch(self, epoch):
@@ -857,7 +737,7 @@ def initialize_model(
 
 def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda"):
     # Define datasets and dataloaders
-    print("Loading the data to RAM..")
+    # logging.info("Loading the data to RAM..")
     start_time = time.time()
     dim_out = train_dataset.output.shape[1]
     if np.ndim(h2) == 0:
@@ -865,7 +745,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     assert len(h2) == dim_out
     if len(args.lr) != len(alpha) and len(args.lr) == 1:
         args.lr = args.lr * len(alpha)
-    print("Done loading in: " + str(time.time() - start_time) + " secs")
+    # logging.info("Done loading in: " + str(time.time() - start_time) + " secs")
     # Define model and enable wandb live policy
     std_genotype = torch.as_tensor(train_dataset.std_genotype).float()
     std_y = torch.sqrt(1 - torch.std(train_dataset.covar_effect, axis=0).float()**2)
@@ -881,7 +761,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         device,
     )
     # Define trainer for training the model
-    print("Starting search for optimal alpha..")
+    logging.info("Starting search for optimal alpha...")
     start_time = time.time()
     trainer = Trainer(
         args,
@@ -899,7 +779,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     for epoch in tqdm(range(args.alpha_search_epochs)):
         log_dict = trainer.train_epoch(epoch)
 
-    print("Done search for alpha in: " + str(time.time() - start_time) + " secs")
+    logging.info("Done search for alpha in: " + str(time.time() - start_time) + " secs")
 
     ## re-evaluate loss and r2 and the end of training
     log_dict = trainer.log_r2_loss(log_dict)
@@ -914,11 +794,10 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
                 "test_r2_pheno_" + str(prs_no) + "_alpha_" + str(alpha_i)
             ]
 
-    print("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
-    print("Best MSE across all alpha values: " + str(np.min(output_loss, axis=1)))
+    logging.info("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
+    logging.info("Best MSE across all alpha values: " + str(np.min(output_loss, axis=1)))
 
     best_alpha = np.argmin(output_loss, axis=1)
-    print(best_alpha)
     mu_list = np.zeros((dim_out, len(std_genotype)))
     spike_list = np.zeros((dim_out, len(std_genotype)))
     for prs_no in range(dim_out):
@@ -961,7 +840,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     overall_start_time = time.time()
     if not args.wandb_mode == "disabled":
-        print("Initializing wandb to log the progress..")
+        logging.info("Initializing wandb to log the progress..")
         wandb.init(
             mode=args.wandb_mode,
             project=args.wandb_project_name,
@@ -972,10 +851,9 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         )
         # Save ENV variables
         with (Path(wandb.run.dir) / "env.txt").open("wt") as f:
-            pprint.pprint(dict(os.environ), f)
+            pprint.info.pprint.info(dict(os.environ), f)
 
-    ## hard-coding alpha values as in BOLT
-    alpha = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
+    alpha = args.alpha #[0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
 
     assert len(alpha) == len(args.lr), "Length of sparsity parameters should be equal to learning rates provided"
     lr_dict = {}
@@ -1001,7 +879,9 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     if args.h2_grid:
         h2_grid = np.array([0.01, 0.25, 0.5, 0.75])
+        logging.info("Starting a grid search for heritability within BLR...")
         for i, h2_i in enumerate(h2_grid):
+            logging.info("Bayesian linear regression ({0}/{1}) with h2 = {2}".format(i+1, len(h2_grid), h2_i))
             output_r2_i, mu_i, spike_i = hyperparam_search(
                 args, alpha, h2_i, train_dataset, test_dataset, device=device
             )
@@ -1039,9 +919,6 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     del test_dataset.covars
     gc.collect()
 
-    ### 🌵
-    # device = "cuda"
-    # output_r2, mu, spike = np.zeros((len(h2), len(alpha))), None, None
     with torch.no_grad():
         torch.cuda.empty_cache()
     gc.collect()
@@ -1053,9 +930,9 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         pheno_for_model.append(np.argmax(output_r2_subset, axis=1) == j)
 
     ## output_loss_subset.shape = number of phenotypes x len(best_alpha)
-    print("Training on entire data with best alphas: " + str(alpha))
+    logging.info("Training on entire data with best alphas: " + str(alpha))
 
-    print("Loading the data to RAM..")
+    # logging.info("Loading the data to RAM..")
     start_time = time.time()
     full_dataset = HDF5Dataset(
         split="both",
@@ -1065,11 +942,10 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         train_split=args.train_split,
         lowmem=args.lowmem
     )
-    print("Done loading in: " + str(time.time() - start_time) + " secs")
+    # logging.info("Done loading in: " + str(time.time() - start_time) + " secs")
     std_genotype = torch.as_tensor(
         full_dataset.std_genotype, dtype=torch.float32
     )  # .to(device)
-    # std_y = torch.std(full_dataset.output, axis=0)  # .to(device)
     std_y = torch.sqrt(1 - torch.std(full_dataset.covar_effect, axis=0).float()**2)
     h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
     chr_map = full_dataset.chr  # .to(device)
@@ -1081,26 +957,24 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         np.argmax(output_r2_subset, axis=1),
         torch.sum(~(torch.isnan(full_dataset.output).all(axis=1))),
         device,
-        args.loco,
+        'exact',
         chr_map,
         mu=mu,
         spike=spike,
     )
-    print(torch.cuda.memory_allocated())
     del mu
     del spike
     gc.collect()
     with torch.no_grad():
         torch.cuda.empty_cache()
 
-    print("Calculating estimates using entire dataset..")
+    logging.info("Calculating estimates using entire dataset...")
     start_time = time.time()
     lr_loco = []
     for a in alpha:
         for chr_no in range(len(torch.unique(chr_map))):
             lr_loco.append(lr_dict[a])
 
-    print(lr_loco)    
     trainer = Trainer(
         args,
         alpha,
@@ -1119,46 +993,20 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## Calculate estimates
 
-    print("Done fitting the model in: " + str(time.time() - start_time) + " secs")
+    logging.info("Done fitting the model in: " + str(time.time() - start_time) + " secs")
 
-    if args.loco == "approx":
-        print("Writing BLUP estimates..")
-        start_time = time.time()
-        trainer.save_blup_estimates(np.argmax(output_r2_subset, axis=1), args.output)
-        print(
-            "Done writing BLUP estimates in: " + str(time.time() - start_time) + " secs"
-        )
-
-        print("Saving approximate LOCO estimates..")
-        start_time = time.time()
-        trainer.save_approx_blup_estimates(
-            np.argmax(output_r2_subset, axis=1), args.output
-        )
-        print(
-            "Done writing approximate LOCO estimates in: "
-            + str(time.time() - start_time)
-            + " secs"
-        )
-    else:
-        print("Saving exact LOCO estimates..")
-        start_time = time.time()
-        trainer.save_exact_blup_estimates(
-            np.argmax(output_r2_subset, axis=1), args.output
-        )
-        print(
-            "Done writing exact LOCO estimates in: "
-            + str(time.time() - start_time)
-            + " secs"
-        )
-
-    print("Saving the learned model..")
+    logging.info("Saving exact LOCO estimates..")
     start_time = time.time()
-    for (alpha_i, model) in zip(alpha, model_list):
-        model_path = args.output + str("model_" + str(alpha_i) + ".pt")
-        torch.save(model.state_dict(), model_path)
-    print("Done saving the model in: " + str(time.time() - start_time) + " secs")
+    trainer.save_exact_blup_estimates(
+        np.argmax(output_r2_subset, axis=1), args.output
+    )
+    logging.info(
+        "Done writing exact LOCO estimates in: "
+        + str(time.time() - start_time)
+        + " secs"
+    )
+
     wandb.finish()
-    print("Total time elapsed: " + str(time.time() - overall_start_time) + " secs")
     if args.lowmem:
         full_dataset.close_hdf5()
 
@@ -1247,13 +1095,6 @@ if __name__ == "__main__":
         type=float,
         default=0.8,
     )
-    parser.add_argument(
-        "--loco",
-        help="select the loco scheme",
-        type=str,
-        choices=["approx", "exact"],
-        default="exact",
-    )
     ## path arguments
     parser.add_argument(
         "--hdf5_filename",
@@ -1276,7 +1117,7 @@ if __name__ == "__main__":
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
 
     device = args.gpu.split(",")
-    print("Using " + str(len(device)) + " GPU(s)...")
+    logging.info("Using " + str(len(device)) + " GPU(s)...")
 
     assert args.train_split < 1 and args.train_split > 0
     h2 = np.loadtxt(args.h2_file)
