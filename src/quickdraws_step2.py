@@ -19,6 +19,9 @@ import time
 from joblib import Parallel, delayed
 from scipy.special import expit
 import warnings
+import logging
+from datetime import datetime
+from art import text2art
 
 from ldscore_calibration import calc_ldscore_chip, ldscore_intercept, get_mask_dodgy
 from custom_linear_regression import (
@@ -28,7 +31,6 @@ from custom_linear_regression import (
 )
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import pdb
-
 
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
@@ -50,7 +52,7 @@ def preprocess_offsets(offsets, pheno_columns, sample_file=None, adj_suffix=""):
         df_concat = pd.merge(df_concat, sample_file, on=["FID", "IID"])
         df_concat = df_concat[pheno_columns]
 
-    print(offsets + " : " + str(df_concat.shape))
+    # logging.info(offsets + " : " + str(df_concat.shape))
     df_concat.to_csv(offsets + adj_suffix, sep="\t", index=None)
 
 
@@ -115,13 +117,13 @@ def calibrate_test_stats(
             correction = intercept_ref / intercept_cur
         
         if ldsc_iter == 4 and np.abs(prev_correction - correction) > 0.01:
-            print(pheno + " entering here...")
-            print(prev_correction - correction)
-            print(sumstats_cur)
+            logging.info(pheno + " entering here...")
+            logging.info(prev_correction - correction)
+            logging.info(sumstats_cur)
             sumstats_cur["CHISQ"] /= overall_correction
             sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
             overall_correction = 1  
-            print(sumstats_cur)
+            logging.info(sumstats_cur)
         else:
             overall_correction *= correction
             sumstats_cur["CHISQ"] *= correction
@@ -132,7 +134,6 @@ def calibrate_test_stats(
     
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
-
     sumstats_cur.to_csv(
         "{0}.{1}.sumstats".format(out, pheno),
         sep="\t",
@@ -165,7 +166,6 @@ def get_test_statistics(
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
     traits = pd.read_csv(phenofile, sep="\s+")
     pheno_columns = traits.columns.tolist()
-    print(pheno_columns)
 
     Parallel(n_jobs=n_workers)(
         delayed(rename_columns)(offset + str(C) + ".offsets", pheno_columns)
@@ -192,7 +192,7 @@ def get_test_statistics(
         pheno_mask = pheno_mask == len(unique_chrs)
         pheno_columns = ['FID','IID'] + (np.array(pheno_columns[2:])[pheno_mask].tolist())
         if not pheno_mask.all():
-            print("Removed traits with complete case-control seperation, updated pheno list = " + str(pheno_columns))
+            logging.info("Removed traits with complete case-control seperation, updated pheno list = " + str(pheno_columns))
 
         traits[pheno_columns].to_csv(phenofile, sep = '\t', index=None, na_rep='NA')
         covar_effects = pd.read_csv(
@@ -205,6 +205,7 @@ def get_test_statistics(
 
     if calibrate:
         # Run LR-unRel using our numba implementation
+        logging.info("Preprocessing traits for unrelated homogenous samples...")
         unrel_sample_traits, unrel_sample_covareffect, unrel_sample_indices = preprocess_phenotypes(phenofile, covar, bedfile, unrel_homo_file, binary)
         unrel_sample_indices = unrel_sample_indices.tolist()
         unrel_sample_covareffect.to_csv(out + ".unrel.covar_effects", sep="\t", index=None)
@@ -217,6 +218,7 @@ def get_test_statistics(
                 out + ".unrel.expit.covar_effects", sep="\t", index=None
             )
 
+        logging.info("Running linear/logistic regression on unrelated individuals...")
         get_unadjusted_test_statistics(
             bedfile,
             [out + ".unrel.traits"] * len(unique_chrs),
@@ -230,6 +232,7 @@ def get_test_statistics(
             firth_pval_thresh=firth_pval_thresh,
         )
     offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
+    logging.info("Running linear/logistic regression...")
     get_unadjusted_test_statistics(
         bedfile,
         [phenofile] * len(unique_chrs),
@@ -245,7 +248,7 @@ def get_test_statistics(
 
     if calibrate:
         if ldscores is None:
-            warnings.warn(
+            logging.warning(
                 "No LD scores provided, using LD score chip.. this might lead to error-prone power"
             )
             ldscores = calc_ldscore_chip(
@@ -257,16 +260,19 @@ def get_test_statistics(
         else:
             ldscores = pd.read_csv(ldscores, sep="\s+")
 
+        logging.info("Calculating the calibration factors to correct the sumstats")
         partial_calibrate_test_stats = partial(
             calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out, binary
         )
         correction = Parallel(n_jobs=min(8, n_workers))(
             delayed(partial_calibrate_test_stats)(i) for i in pheno_columns[2:]
         )
+        logging.info("Caliration factors stored in: " +str(out) + ".calibration")
         np.savetxt(out + ".calibration", correction)
     else:
         correction = None
 
+    logging.info("Summary stats stored as: " + str(out) + ".{pheno}.sumstats.gz")
     return correction
 
 
@@ -295,7 +301,7 @@ def get_test_statistics_bgen(
 
     if calibrationFile is not None:
         calibration_factors = np.loadtxt(calibrationFile)
-        print(calibration_factors)
+        logging.info("Using calibration file specified in: " + str(calibrationFile))
     else:
         calibration_factors = np.ones(len(traits.columns.tolist()) - 2)
 
@@ -330,36 +336,7 @@ def get_test_statistics_bgen(
             )
             for C in unique_chrs
         )
-
-    #### CAUTION -- running LR unrel ######
-    # for c in unique_chrs:
-    #     pheno = pd.read_csv(phenofile + str(unique_chrs) + ".preprocessed",'\t')
-    #     unrel_homo = pd.read_csv('unrelated_White_British.FID_IID.txt','\s+', header=None)
-    #     unrel_homo = unrel_homo.rename(columns={0:'FID',1:'IID'})
-    #     pheno_unrel = pd.merge(pheno, unrel_homo, on=['FID','IID'])
-    #     print(pheno_unrel.shape)
-    #     pheno_unrel.to_csv(phenofile + str(unique_chrs) + ".unrel.preprocessed", sep="\t", index=None)
-    
-    # get_unadjusted_test_statistics_bgen(
-    #     bgenfile,
-    #     samplefile,
-    #     [phenofile + str(unique_chrs) + ".unrel.preprocessed"] * len(unique_chrs),
-    #     None,
-    #     covar,
-    #     out + "_lrunrel",
-    #     unique_chrs,
-    #     extractFile,
-    #     num_threads=n_workers,
-    #     binary=False,
-    #     firth=False,
-    #     firth_pval_thresh=firth_pval_thresh
-    # )
-    # Parallel(n_jobs=n_workers)(
-    #     delayed(adjust_test_stats)(out + "_lrunrel", pheno, correction)
-    #     for (pheno, correction) in zip(pheno_columns[2:], np.ones(len(pheno_columns[2:])))
-    # )
-    ###########################################
-
+    logging.info("Running linear/logistic regression...")
     get_unadjusted_test_statistics_bgen(
         bgenfile,
         samplefile,
@@ -382,6 +359,7 @@ def get_test_statistics_bgen(
         delayed(adjust_test_stats)(out, pheno, correction)
         for (pheno, correction) in zip(pheno_columns[2:], calibration_factors)
     )
+    logging.info("Summary stats stored as: " + str(out) + ".{pheno}.sumstats.gz")
 
 
 if __name__ == "__main__":
@@ -452,14 +430,44 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    offsets_file = args.output_step1 + "loco_chr"
 
+    ######      Logging setup                    #######
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[
+            logging.FileHandler(args.output + ".log"),
+            logging.StreamHandler()
+        ]
+    )
+    logging.info(text2art("Quickdraws"))
+    logging.info("Copyright (c) 2024 Hrushikesh Loya and Pier Palamara.")
+    logging.info("Distributed under the GPLv3 License.")
+    logging.info("")
+    logging.info("Logs saved in: " + str(args.output + ".step2.log"))
+    logging.info("")
+
+    logging.info("Options in effect: ")
+    for arg in vars(args):
+        logging.info('     {}: {}'.format(arg, getattr(args, arg)))
+
+    logging.info("")
+
+    st = time.time()
+    logging.info("#### Start Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
+    logging.info("")
+
+    offsets_file = args.output_step1 + "loco_chr"
     traits = args.output_step1 + ".traits"
     covareffects = args.output_step1 + ".covar_effects"
 
+    assert (args.calibrate and args.unrel_sample_list is not None) or (not args.calibrate)
+    "Provide a list of unrelated homogenous sample if you wish to calibrate"
+
     ######      Calculating test statistics       ######
     st = time.time()
-    print("Calculating test statistics..")
+    logging.info("#### Step 2. Calculating test statistics ####")
+    warnings.simplefilter("ignore")
     if args.bgen is None:
         get_test_statistics(
             args.bed,
@@ -489,4 +497,7 @@ if __name__ == "__main__":
             args.firth,
             args.firth_pval_thresh,
         )
-    print("Done in " + str(time.time() - st) + " secs")
+    logging.info("#### Step 2. done in: " + str(time.time() - st) + " secs ####")
+    logging.info("")
+    logging.info("#### End Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
+    logging.info("")

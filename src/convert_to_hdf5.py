@@ -10,6 +10,8 @@ from pysnptools.distreader import Bgen
 import pdb
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
+import logging
+logger = logging.getLogger(__name__)
 
 ## get covariate effect on genotypes and std_genotype
 def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096):
@@ -51,8 +53,8 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
             ]
         )
         if (xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] < 0).any():
-            print("Check if covariates are independent, the covariate linear regression might be unstable...")
-            pdb.set_trace() 
+            logging.exception("Check if covariates are independent, the covariate linear regression might be unstable...")
+            raise ValueError
     return covars, geno_covar_effect, np.sqrt(xtx / len(sample_indices))
 
 
@@ -66,9 +68,6 @@ def convert_to_hdf5(
     train_split = 0.8,
     binary=False
 ):
-    ## pheno is the adjusted pheno
-    ## sample_indices come from the preprocess_phenotypes
-    ## snps_to_keep is a list of SNPs to be included in the analysis
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
 
     ## handle phenotypes here
@@ -93,7 +92,7 @@ def convert_to_hdf5(
         for snp in snps_to_keep:
             snp_mask[snp_dict[snp]] = True
 
-
+    logging.info("Estimating variance per allele...")
     covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
         bed, sample_indices, covars, snp_mask, chunk_size=4096
     )
@@ -102,12 +101,11 @@ def convert_to_hdf5(
 
     total_snps = int(sum(snp_mask))
     total_samples = len(sample_indices)
-    print("Total samples = " + str(total_samples))
+    logging.info("Total number of samples in HDF5 file = " + str(total_samples))
 
     ## store the PRS / phenotype
     y = pheno[pheno.columns[2:]].values
     z = covareffect[covareffect.columns[2:]].values
-    ## handle genotypes here
 
     ## caution: removed compression
     dset1 = h1.create_dataset(
@@ -134,8 +132,7 @@ def convert_to_hdf5(
         "iid", data=np.array(snp_on_disk.iid[sample_indices], dtype=int), dtype="int"
     )
 
-    # sum_genotype = np.zeros(total_snps)
-    # sum_square_genotype = np.zeros(total_snps)
+    logging.info("Saving the genotype to HDF5 file...")
     for i in tqdm(range(0, total_samples, chunk_size)):
         x = 2 - (
             snp_on_disk[
@@ -151,25 +148,12 @@ def convert_to_hdf5(
             np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
             x,
         )
-        # sum_genotype += np.sum(x, axis=0)
-        # sum_square_genotype += np.sum(x**2, axis=0)
         dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
         dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
         ## np.packbits() requires most time (~ 80%)
 
-    # dset4[:] = sum_genotype / total_samples
-    # dset5[:] = np.sqrt(
-    #     sum_square_genotype / total_samples - (sum_genotype / total_samples) ** 2
-    # )
     h1.close()
     return out + ".hdf5"
-
-
-def load_bgen_tempfiles(args):
-    snp_on_disk = Bgen(args.bgen, sample=args.sample)
-    snp_on_disk = snp_on_disk.as_snp(max_weight=2)
-    snp_on_disk.shape
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -201,10 +185,6 @@ if __name__ == "__main__":
         help='file with sample id to remove; should be in "FID,IID" format and tsv',
         type=str,
     )
-    parser.add_argument("--bgen", help="Location to Bgen file", type=str, default=None)
-    parser.add_argument(
-        "--sample", help="Location to samples file", type=str, default=None
-    )
     parser.add_argument(
         "--modelSnps",
         help="Path to list of SNPs to be considered in BLR",
@@ -230,5 +210,3 @@ if __name__ == "__main__":
         filename = convert_to_hdf5(
             args.bed, args.covar, sample_indices, args.output, args.modelSnps
         )
-    if args.bgen is not None and args.sample is not None:
-        load_bgen_tempfiles(args)

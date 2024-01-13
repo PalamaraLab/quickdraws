@@ -11,9 +11,10 @@ import os
 import pdb
 from scipy.special import expit
 from sklearn.preprocessing import quantile_transform
+import logging
+logger = logging.getLogger(__name__)
 
-
-def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 1.0):
+def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 0.0):
     snp_on_disk = Bed(bed, count_A1=True)
     samples_geno = [int(x) for x in snp_on_disk.iid[:, 0]]
 
@@ -29,28 +30,20 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 1.0)
     Traits = Traits.dropna(subset=[Traits.columns[0]])
     N_phen = Traits.shape[1] - 2  # exclude FID, IID
 
-    print("{0} phenotypes were loaded for {1} samples.".format(N_phen, Traits.shape[0]))
+    logging.info("Loading and preparing phenotypes...")
+    logging.info("{0} phenotype(s) were loaded for {1} samples".format(N_phen, Traits.shape[0]))
     # remove those without genotypes
     Traits = Traits.drop(
         set(Traits["FID"]).difference(set(samples_geno).intersection(Traits.FID)),
         axis=0,
     )
     Traits.reindex(sorted(Traits.columns), axis=1)
-    # check if any individual is less than 50% phenotyped
-    samples_with_missing = np.where(Traits.isna().sum(axis=1) / N_phen > phen_thres)[0]
-    print(
-        "{0} samples are less than {1}% phenotyped and will be excluded.".format(
-            len(samples_with_missing), 100 * phen_thres
-        )
-    )
-    Traits.drop(Traits.FID.iloc[samples_with_missing], axis=0, inplace=True)
-
     ## check if any trait is less than 50% phenotyped
     traits_with_missing = np.where(
-        Traits.isna().sum(axis=0) / Traits.shape[0] > phen_thres
+        Traits.isna().sum(axis=0) / Traits.shape[0] > (1-phen_thres)
     )[0]
-    print(
-        "{0} traits are less than {1}% phenotyped and will be excluded.".format(
+    logging.info(
+        "{0} traits are less than {1}% phenotyped and will be excluded".format(
             len(traits_with_missing), 100 * phen_thres
         )
     )
@@ -58,7 +51,7 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 1.0)
 
     ## check if any trait is unary
     traits_unary = np.where(Traits.nunique() == 1)[0]
-    print("{0} traits are unary and will be excluded.".format(len(traits_unary)))
+    logging.info("{0} traits are unary and will be excluded".format(len(traits_unary)))
     Traits.drop(Traits.columns[traits_unary], axis=1, inplace=True)
 
     ### Mean impute the missing values, to keep things simple ahead
@@ -73,19 +66,19 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 1.0)
         for col in Traits.columns[2:]:
             Traits[col] = Traits[col] == unique_vals[1]
             Traits[col] = Traits[col].astype(int)
-        print("Identified {0} binary traits.".format(Traits.shape[1] - 2))
+        logging.info("Identified {0} binary traits.".format(Traits.shape[1] - 2))
 
     ## standardize the traits
     else:
         for col in Traits.columns[2:]:
             Traits[col] = (Traits[col] - Traits[col].mean()) / Traits[col].std()
-        print("Identified {0} continuous traits.".format(Traits.shape[1] - 2))
+        logging.info("Identified {0} continuous traits.".format(Traits.shape[1] - 2))
 
     ################ CAUTION #######################
 
     ### covariate adjustment
     if covar is not None:
-        print("Loading and preparing covariates...")
+        logging.info("Loading and preparing covariates...")
         df_covar = pd.read_csv(covar, sep="\s+", low_memory=False)
         trait_columns = Traits.columns[2:]
         covar_columns = df_covar.columns[2:]
@@ -93,16 +86,14 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 1.0)
 
         ## Some covariates may have some NaN
         # if np.isnan(merged_df.values).any():
-        #     print("Oops! There are a few missing values in the covariates..")
+        #     logging.info("Oops! There are a few missing values in the covariates..")
         #     merged_df = merged_df.fillna(merged_df.median())
         merged_df = merged_df.dropna(axis=0)
-        print(merged_df.shape)
 
         samples_to_keep = np.array(merged_df.FID, dtype=int)
         N_total = len(merged_df)
-        print(
-            "Samples with available genotypes, phenotypes, and covariates to keep for analysis:",
-            N_total,
+        logging.info(
+            "Samples with available genotypes, phenotypes, and covariates to keep for analysis:" + str(N_total)
         )
         W = np.concatenate(
             [merged_df[covar_columns].to_numpy()[:, np.std(merged_df[covar_columns].to_numpy(), axis=0) > 0], np.ones((N_total, 1))], axis=1
@@ -119,14 +110,13 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 1.0)
                 ).fit(W, Trait)
                 merged_df["covar_effect_" + str(col)] = (clf.coef_ @ (W.T)).flatten()
     else:
-        print("\nWARNING: No covariates will be used! Are the traits already adjusted?")
+        logging.warning("No covariates will be used! This might lead to calibration issues..")
         samples_to_keep = set(samples_geno).intersection(Traits.FID)
         Traits = Traits.drop(set(Traits["FID"]).difference(samples_to_keep), axis=0)
 
         N_total = len(Traits)
-        print(
-            "Samples with available genotypes and phenotypes to keep for analysis:",
-            N_total,
+        logging.info(
+            "Samples with available genotypes and phenotypes to keep for analysis:" + str(N_total)
         )
 
         for col in trait_columns:
@@ -188,14 +178,14 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
         )
         unrel_homo_samples = pd.merge(Trait, unrel_homo_samples, on=["FID", "IID"])
         unrel_sample_list = unrel_homo_samples.FID.tolist()
-        print("Number of unrelated homogenous samples: " + str(len(unrel_sample_list)))
+        logging.info("Number of unrelated homogenous samples: " + str(len(unrel_sample_list)))
     else:
         unrel_sample_list = np.array(snp_on_disk.iid[:, 0].tolist(), dtype="int")
 
     unrel_pheno = []
     for sample in unrel_sample_list:
         try:
-            unrel_pheno.append(Trait[Trait.FID == sample].values[0])
+            unrel_pheno.append(Trait[Trait.FID == sample].values[0] - covar_effects[covar_effects.FID == sample].values[0])
         except:
             unrel_pheno.append([sample, sample] + [np.nan] * (Trait.shape[1] - 2))
 
@@ -230,20 +220,3 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     preprocess_phenotypes(args.pheno, args.covar, args.bed, args.keepfile)
-
-
-"""
-Phenotype QC:
-import pandas as pd 
-import numpy as np
-df = pd.read_csv('blood_count_biochemistry.csv', sep='\s+')
-for Trait in df.columns[2:]:
-    df[Trait] = (df[Trait] - np.mean(df[Trait])) / np.std(df[Trait])
-df2 = df[df.columns[2:]].clip(-10,10)
-df2[['FID','IID']] = df[['FID','IID']]
-df2 = df2[df.columns]
-for Trait in df.columns[2:]:
-    df2[Trait] = (df2[Trait] - np.mean(df2[Trait])) / np.std(df2[Trait])
-df2 = df2[df2.columns[0:52]] ## only 50 phenptypes
-df2.to_csv('blood_count_biochemistry_outlier.csv', sep='\t', index=None, na_rep='NA')
-"""

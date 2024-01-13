@@ -3,18 +3,17 @@ import numpy as np
 import torch
 import time
 import h5py
+import logging
+from datetime import datetime
+from art import text2art
+import warnings
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 from runRHE import runRHE, MakeAnnotation, runSCORE
 from convert_to_hdf5 import convert_to_hdf5
 from blr import blr_spike_slab, str_to_bool
-from cavi import cavi_on_svi
-
-## main script for the method
-# dependency: pysnptools, pytorch, argparse, Path, wandb, qmplot, plink2 and RHE-MCMT
 
 overall_st = time.time()
-
 ######      Setting the random seeds         ######
 np.random.seed(2)
 torch.manual_seed(2)
@@ -36,16 +35,10 @@ parser.add_argument(
     type=str,
 )
 parser.add_argument(
-    "--removeFile",
+    "--keepFile",
     "-r",
-    help='file with sample id to remove; should be in "FID,IID" format and tsv',
+    help='file with sample id to keep; should be in "FID,IID" format and tsv',
     type=str,
-)
-parser.add_argument(
-    "--unrel_sample_list",
-    help="File with un-related homogenous sample list (FID, IID)",
-    type=str,
-    default=None,
 )
 parser.add_argument(
     "--output",
@@ -65,22 +58,10 @@ parser.add_argument(
     default="false",
 )
 parser.add_argument(
-    "--calibrate",
-    help="Do you wish to calibrate your test-statistics ?",
-    type=str_to_bool,
-    default="True",
-)
-parser.add_argument(
     "--modelSnps",
     help="Path to list of SNPs to be considered in BLR",
     default=None,
     type=str,
-)
-parser.add_argument(
-    "--cavi_on_top",
-    type=int,
-    help="Runs a few cavi steps on top for better results",
-    default=0,
 )
 parser.add_argument(
     "--rhemc",
@@ -116,15 +97,22 @@ parser.add_argument(
         1e-4,
         2e-5,
         5e-6,
-    ],  ##changed from [4e-4, 4e-4, 2e-4, 2e-4, 5e-5, 2e-5]
+    ],
 )
-# parser.add_argument(
-#     "-lr_min",
-#     "--min_learning_rate",
-#     help="Minimum learning rate for cosine scheduler",
-#     type=float,
-#     default=1e-5,
-# )
+parser.add_argument(
+    "--alpha",
+    help="Sparsity grid for Bayesian linear regression",
+    type=float,
+    nargs="+",
+    default=[
+        0.01,
+        0.02,
+        0.05,
+        0.1,
+        0.2,
+        0.5,
+    ],
+)
 parser.add_argument(
     "-scheduler",
     "--cosine_scheduler",
@@ -139,9 +127,6 @@ parser.add_argument(
     "--forward_passes", help="Number of forward passes in blr", type=int, default=1
 )
 parser.add_argument(
-    "--gpu", help="Which GPU card do you wish to use ?", type=str, default="0"
-)
-parser.add_argument(
     "--num_workers",
     help="torch.utils.data.DataLoader num_workers",
     type=int,
@@ -152,13 +137,6 @@ parser.add_argument(
     help="The training split proportion in (0,1)",
     type=float,
     default=0.8,
-)
-parser.add_argument(
-    "--loco",
-    help="select the loco scheme",
-    type=str,
-    choices=["approx", "exact"],
-    default="exact",
 )
 parser.add_argument(
     "--binary",
@@ -180,6 +158,12 @@ parser.add_argument(
     type=int,
     default=50
 )
+parser.add_argument(
+    "--phen_thres",
+    help="The phenotyping rate threshold below which the phenotype isn't used to perform GWAS",
+    type=int,
+    default=0
+)
 
 ## wandb arguments
 wandb_group = parser.add_argument_group("WandB")
@@ -199,29 +183,66 @@ wandb_group.add_argument(
     help="Wandb job type. This is useful for grouping runs together.",
     default=None,
 )
-
 args = parser.parse_args()
 
-assert (args.calibrate and args.unrel_sample_list is not None) or (not args.calibrate)
-"Provide a list of unrelated homogenous sample if you wish to calibrate"
+######      Logging setup                    #######
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    handlers=[
+        logging.FileHandler(args.output + ".log"),
+        logging.StreamHandler()
+    ]
+)
+
+logging.info(text2art("Quickdraws"))
+logging.info("Copyright (c) 2024 Hrushikesh Loya and Pier Palamara.")
+logging.info("Distributed under the GPLv3 License.")
+logging.info("")
+logging.info("Logs saved in: " + str(args.output + ".step1.log"))
+logging.info("")
+
+logging.info("Options in effect: ")
+for arg in vars(args):
+    logging.info('     {}: {}'.format(arg, getattr(args, arg)))
+
+logging.info("")
 
 ######      Preprocessing the phenotypes      ######
 st = time.time()
+logging.info("#### Start Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
+logging.info("")
+
+warnings.simplefilter("ignore")
+
 if args.output_step0 is not None:
+    logging.info("#### Step 1a. Using preprocessed phenotype and hdf5 files ####")
     rhe_output = args.output_step0
+    hdf5_filename = args.output_step0 + ".hdf5"
+    sample_indices = np.array(h5py.File(hdf5_filename, "r")["sample_indices"])
+    logging.info("#### Step 1a. done in " + str(time.time() - st) + " secs ####")
+    logging.info("")
 else:
-    print("Preprocessing the phenotypes..")
+    logging.info("#### Step 1a. Preprocessing the phenotypes and converting bed to hdf5 ####")
     rhe_output = args.output
     Traits, covar_effects, sample_indices = preprocess_phenotypes(
-        args.pheno, args.covar, args.bed, args.removeFile, args.binary
+        args.pheno, args.covar, args.bed, args.keepFile, args.binary, args.phen_thres
     )
     PreparePhenoRHE(Traits, covar_effects, args.bed, rhe_output, None)
-    print("Done in " + str(time.time() - st) + " secs")
+    hdf5_filename = convert_to_hdf5(
+        args.bed,
+        args.covar,
+        sample_indices,
+        args.output,
+        args.modelSnps,
+    )
+    logging.info("#### Step 1a. done in " + str(time.time() - st) + " secs ####")
+    logging.info("")
 
 ######      Run RHE-MC for h2 estimation      ######
 if args.h2_file is None and not args.h2_grid:
     st = time.time()
-    print("Calculating heritability estimates using RHE..")
+    logging.info("#### Step 1b. Calculating heritability estimates using RHE ####")
     if args.make_annot:
         args.annot = args.output + ".maf2_ld4.annot"
         MakeAnnotation(
@@ -242,38 +263,31 @@ if args.h2_file is None and not args.h2_grid:
         args.binary,
         args.rhe_random_vectors,
     )
-    print("Done in " + str(time.time() - st) + " secs")
+    logging.info("#### Step 1b. done in " + str(time.time() - st) + " secs ####")
+    logging.info("")
 elif args.h2_file is not None:
-    print("Loading heritability estimates from: " + str(args.h2_file))
-    VC = np.loadtxt(args.h2_file)
-else:
-    VC = None
-
-######      Converting .bed to .hdf5          ######
-if args.output_step0 is None:
     st = time.time()
-    print("Converting Bed file to HDF5..")
-    hdf5_filename = convert_to_hdf5(
-        args.bed,
-        args.covar,
-        sample_indices,
-        args.output,
-        args.modelSnps,
-    )
-    print("Done in " + str(time.time() - st) + " secs")
+    logging.info("#### Step 1b. Loading heritability estimates from: " + str(args.h2_file) + " ####")
+    logging.info("")
+    VC = np.loadtxt(args.h2_file)
+    logging.info("#### Step 1b. done in " + str(time.time() - st) + " secs ####")
+    logging.info("")
 else:
-    print("Loading HDF5 file from: " + str(args.output_step0) + ".hdf5")
-    hdf5_filename = args.output_step0 + ".hdf5"
-    sample_indices = np.array(h5py.File(hdf5_filename, "r")["sample_indices"])
+    st = time.time()
+    logging.info("#### Step 1b. Using h2_grid : {0} and performing a grid search in BLR ####".format(args.h2_grid))
+    logging.info("")
+    VC = None
+    logging.info("#### Step 1b. done in " + str(time.time() - st) + " secs ####")
+    logging.info("")
+
 
 ######      Running variational inference     ######
 st = time.time()
-print("Running VI using spike and slab prior..")
+logging.info("#### Step 1c. Running VI using spike and slab prior ####")
 blr_spike_slab(args, VC, hdf5_filename)
-if args.cavi_on_top > 0:
-    print("Running a few CAVI steps on top..")
-    cavi_on_svi(args, hdf5_filename)
-
-print("Done in " + str(time.time() - st) + " secs")
-
-print("Step 1+2 total Time: " + str(time.time() - overall_st) + " secs")
+logging.info("#### Step 1c. done in " + str(time.time() - st) + " secs ####")
+logging.info("")
+logging.info("#### Step 1 total Time: " + str(time.time() - overall_st) + " secs ####")
+logging.info("")
+logging.info("#### End Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
+logging.info("")

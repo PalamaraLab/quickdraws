@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from pysnptools.snpreader import Bed
 from pysnptools.distreader import Bgen
+from pybgen import PyBGEN
 from scipy.stats import chi2
 from tqdm import tqdm
 import numba
@@ -13,7 +14,6 @@ from scipy.special import logit
 from joblib import Parallel, delayed
 import os
 
-
 def preprocess_covars(covarFile, iid_fid):
     covars = pd.read_csv(covarFile, sep="\s+")
     covars = pd.merge(
@@ -21,16 +21,12 @@ def preprocess_covars(covarFile, iid_fid):
         covars,
         on=["FID", "IID"],
     )
-    # for covar_col in covars.columns[2:]:
-    #     covars[covar_col] = covars[covar_col].fillna(np.nanmean(covars[covar_col]))
     covars = covars.fillna(covars.median())
     covars = covars[covars.columns[2:]]
-    # covars = (covars - covars.min(axis=0)) / (covars.max(axis=0) - covars.min(axis=0))
     covars = covars.loc[:, covars.std() > 0]
     covars["ALL_CONST"] = 1
     covars = np.array(covars.values, dtype="float32")
     return covars
-
 
 def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, out):
     bim = pd.read_csv(
@@ -55,7 +51,6 @@ def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, o
             mode="w",
         )
 
-
 def write_sumstats_file_bgen(
     snp_on_disk, pheno_names, num_samples, afreq, beta, chisq, out
 ):
@@ -68,6 +63,10 @@ def write_sumstats_file_bgen(
     bim["ALT_FREQS"] = afreq
     se = np.abs(beta) / np.sqrt(chisq)
     pval = chi2.sf(chisq, df=1)
+    # 
+    #f = PyBGEN("ukb_imp_chr22_v3.bgen")
+    #f.get_variant('rs78222150')[0][0].a1  ## ref 
+    #f.get_variant('rs78222150')[0][0].a2  ## alt
     for pheno_no, pheno in enumerate(pheno_names):
         bim["BETA"] = -beta[pheno_no]
         bim["SE"] = se[pheno_no]
@@ -80,7 +79,6 @@ def write_sumstats_file_bgen(
             mode="w",
         )
 
-
 def check_residuals_same_order(residualFileList):
     for chr_no in range(len(residualFileList)):
         df = pd.read_csv(residualFileList[chr_no], sep="\s+")
@@ -91,18 +89,8 @@ def check_residuals_same_order(residualFileList):
                 iid == df.IID.values
             ).all(), "Residuals file don't follow same order of FID, IID"
 
-
 @numba.jit(nopython=True, parallel=True)
 def MyLinRegr(X, Y, W, offset):
-    """
-    Author: Yiorgos + Hrushi
-    DIY Linear regression with covariates and low memory footprint.
-    X should be NxM, for sufficiently large M (e.g. one chromosome), and mean centered
-    Y is multi-phenotype but should also be mean centered.
-    W needs to be a NxC array with covariates including ones (the constant).
-    Returns a DataFrame with estimated effect sizes, Chi-Sqr statistics, and p-values
-    """
-
     ## Preprocess genotype first
     afreq = np.zeros(X.shape[1])
     for snp in numba.prange(X.shape[1]):
@@ -111,7 +99,6 @@ def MyLinRegr(X, Y, W, offset):
         X[:, snp][isnan_at_snp] = 0
         X[:, snp][~isnan_at_snp] -= freq
         afreq[snp] = freq / 2
-
     N, M = X.shape
     beta, chisq = np.zeros((Y.shape[1], M)), np.zeros((Y.shape[1], M))
     K = np.linalg.inv(W.T.dot(W))
@@ -133,16 +120,6 @@ def MyLinRegr(X, Y, W, offset):
 
 @numba.jit(nopython=True, parallel=True)
 def MyLogRegr(X, Y, W, offset):
-    """
-    Author: Hrushi
-    DIY Logistic regression with covariates and low memory footprint.
-    X should be NxM, for sufficiently large M (e.g. one chromosome), and mean centered
-    Y is multi-phenotype but should also be mean centered.
-    W needs to be a NxC array with covariates including ones (the constant).
-    offset is a NxP array with the offset for each phenotype
-    Returns a DataFrame with estimated effect sizes, Chi-Sqr statistics, and p-values
-    """
-
     ## Preprocess genotype first
     afreq = np.zeros(X.shape[1])
     for snp in numba.prange(X.shape[1]):
@@ -151,7 +128,6 @@ def MyLogRegr(X, Y, W, offset):
         X[:, snp][isnan_at_snp] = 0
         X[:, snp][~isnan_at_snp] -= freq
         afreq[snp] = freq / 2
-
     N, M = X.shape
     beta, chisq = np.zeros((Y.shape[1], M)), np.zeros((Y.shape[1], M))
     y_hat = Y - offset
@@ -171,7 +147,6 @@ def MyLogRegr(X, Y, W, offset):
         beta[pheno] = numerators / denominator
     return beta, chisq, afreq
 
-
 def firth_parallel(
     chisq_snp, beta_snp, freq_snp, geno_snp, Y, pred_covars, covars, firth_pval_thresh
 ):
@@ -187,27 +162,16 @@ def firth_parallel(
     beta_out[pheno_mask] = beta_firth
     return chisq_out, beta_out
 
-
 def firth_null_parallel(offsetFile, Y, covar_effects, covars):
     offset = pd.read_csv(offsetFile, sep="\s+")
     iid_fid = offset[["FID", "IID"]]
     offset = offset[offset.columns[2:]].values.astype("float32")
     random_effects = logit(offset) - covar_effects
-    # if os.path.isfile(offsetFile + ".firth_null"):
-    #         firth_null_chr = pd.read_csv(offsetFile + ".firth_null", sep="\s+")
-    #         mdf = pd.merge(
-    #             iid_fid,
-    #             firth_null_chr,
-    #             on=["FID", "IID"],
-    #         )
-    #         pred_covars = mdf.values[:, 2:]
-    # else:
     pred_covars, _, _ = firth_logit_covars(covars, Y, random_effects)
     pd.concat([iid_fid, pd.DataFrame(pred_covars)], axis=1).to_csv(
         offsetFile + ".firth_null", sep="\t", index=None
     )
     return pred_covars
-
 
 def get_unadjusted_test_statistics(
     bedFile,
@@ -247,9 +211,6 @@ def get_unadjusted_test_statistics(
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
-
-    print("Running linear/logistic regression to get association")
-
     covar_effects = pd.read_csv(
         phenoFileList[0].split(".traits")[0] + ".covar_effects", sep="\s+"
     )
@@ -337,7 +298,6 @@ def get_unadjusted_test_statistics(
         out,
     )
 
-
 def get_unadjusted_test_statistics_bgen(
     bgenFile,
     sampleFile,
@@ -359,7 +319,6 @@ def get_unadjusted_test_statistics_bgen(
 
     snp_on_disk = Bgen(bgenFile, sample=sampleFile)
     snp_on_disk = snp_on_disk.as_snp(max_weight=2)
-
     fid_iid = np.array(
         [
             [
@@ -369,7 +328,6 @@ def get_unadjusted_test_statistics_bgen(
             for i in range(snp_on_disk.shape[0])
         ]
     )
-
     ## --extract flag
     if snps_to_keep_filename is None:
         total_snps = snp_on_disk.sid_count
@@ -413,9 +371,6 @@ def get_unadjusted_test_statistics_bgen(
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
-
-    print("Running linear/logistic regression to get association")
-
     pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
 
@@ -521,21 +476,14 @@ def get_unadjusted_test_statistics_bgen(
 
 
 if __name__ == "__main__":
-
     bedFile = "simulate/ukbb50k_unrel_gbp"
     residualFileList = []
     for chr in range(1, 23):
         residualFileList.append(
             "output/exact_loco_blr_unrel_gbploco_chr" + str(chr) + ".residuals"
         )
-    # for chr in range(1, 23):
-    #     residualFileList.append("simulate/ukbb50k_all.pheno")
-    # residualFile = "simulate/ukbb50k_all.pheno"
     covarFile = "simulate/covariates.tab"
     out = "output/test_blr_all"
-    # get_unadjusted_test_statistics(
-    #     bedFile, residualFileList, covarFile, out, np.arange(1, 23), num_threads=8
-    # )
 
     bgenFile = "ukbb_gbp/ukb_imp_chr18_v3.bgen"
     sampleFile = "/well/palamara/projects/UKBB_APPLICATION_43206/new_copy/data_download/ukb22828_c22_b0_v3_s487276.sample"

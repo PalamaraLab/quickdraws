@@ -11,15 +11,17 @@ import argparse
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 from blr import str_to_bool
 from scipy.stats import norm
-
+import logging
+logger = logging.getLogger(__name__)
 
 def MakeAnnotation(bed, maf_bins, ld_score_percentiles, outfile=None):
     """Intermediate helper function to generate MAF / LD structured annotations. Credits: Arjun"""
+    logging.info("Making annotation for accurate h2 estimation")
     try:
         df = pd.read_csv("/well/palamara/projects/UKBB_APPLICATION_43206/new_copy/plink_missingness_regenielike_filters/ukb_app43206_500k.maf00001.score.ld", sep="\s+")
-        print("MAF/LD info are loaded for {0} SNPs".format(len(df)))
+        logging.info("MAF/LD info are loaded for {0} SNPs".format(len(df)))
     except:
-        print("File with MAF-LD scores is wrong!")
+        logging.exception("File with MAF-LD scores is wrong!")
         raise ValueError
     mafs = df.MAF.values
     ld_scores = df.ldscore.values
@@ -61,7 +63,7 @@ def MakeAnnotation(bed, maf_bins, ld_score_percentiles, outfile=None):
     hla = hla[hla[0] == 6]
     hla = hla[hla[3] > 28.4e6]
     hla = hla[hla[3] < 33.5e6]
-    print("Variants removed from HLA:", len(hla))
+    logging.info("Variants removed from HLA:", len(hla))
     tot_cats[hla.index] = 0
 
     #   Make sure there are SNPs in every category
@@ -108,7 +110,7 @@ def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
             + " -o "
             + str(out)
         )
-        print("Invoking SCORE as", cmd)
+        logging.info("Invoking SCORE as", cmd)
         _ = subprocess.run(cmd, shell=True)
     N_phen = pd.read_csv(pheno, sep="\s+").shape[1] - 2
     VC_full = np.zeros((N_phen, N_phen))
@@ -122,7 +124,7 @@ def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
                 phen_no2 = int(line.split("(")[1].split(")")[0].split(",")[1])
                 VC_full[phen_no1, phen_no2] = float(line.split("\t")[1])
                 VC_full[phen_no2, phen_no1] = float(line.split("\t")[1])
-    print("The genetic covariance matrix inferred from SCORE: " + str(VC_full))
+    logging.info("The genetic covariance matrix inferred from SCORE: " + str(VC_full))
     np.savetxt(out + ".h2", VC_full)
     return VC_full
 
@@ -162,7 +164,7 @@ def runRHE(
 
     if annotation is not None:
         # we assume the annotation exists already and infer K
-        print("Opening annotation file provided, doing MC GWAS")
+        logging.info("Opening annotation file provided, doing MC GWAS")
         table = pd.read_csv(annotation, sep="\s+", header=None)
         K = table.shape[1]
         assert table.shape[0] == M
@@ -178,17 +180,12 @@ def runRHE(
         table.to_csv(out + ".random.annot", header=None, index=None, sep=" ")
         annotation = out + ".random.annot"
 
-        # snp_on_disk = Bed(bedfile, count_A1=True)
-        # chrs = snp_on_disk.pos[:, 0]
-        # chrs = chrs - np.min(chrs)
-        # table = np.zeros((len(chrs), len(np.unique(chrs))), dtype=np.int8)
-        # for i in range(len(chrs)):
-        #     table[i, int(chrs[i])] = 1
-        # table = pd.DataFrame(table)
-        # table.to_csv(out + ".random.annot", header=None, index=None, sep=" ")
-        # annotation = out + ".random.annot"
-
     N_phen = pd.read_csv(pheno, sep="\s+").shape[1] - 2
+
+    if random_vectors < N_phen:
+        logging.exception("Supply more random vectors than the phenotypes being analyzed")
+        raise ValueError
+
     # now run RHE
     if True:
         cmd = "./" + rhemc + " -g " + bedfile + " -p " + pheno + " -annot " + annotation
@@ -200,7 +197,7 @@ def runRHE(
             covariates_df.to_csv(covariates + ".rhe", sep="\t", index=None, na_rep="NA")
             cmd += " -c " + covariates + ".rhe"
         cmd += " -k " + str(random_vectors) + " -jn 10 > " + savelog
-        print("Invoking RHE as", cmd)
+        logging.info("Invoking RHE as: " + str(cmd))
         _ = subprocess.run(cmd, shell=True)
 
     if os.path.isfile(savelog):
@@ -228,7 +225,7 @@ def runRHE(
                 VC[pheno] *= prev * (1 - prev) / (z**2)
 
         np.savetxt(out + ".h2", VC)
-        print(
+        logging.info(
             "Variance components estimated as "
             + str(VC)
             + " saved in "
@@ -236,7 +233,8 @@ def runRHE(
         )
         return VC
     else:
-        print("ERROR: RHEmc did not complete.")
+        logging.exception("ERROR: RHEmc did not complete.")
+        raise ValueError
         return "nan"
 
 
@@ -288,7 +286,7 @@ if __name__ == "__main__":
     )
     PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
     if args.make_annot:
-        print("No annotation was given so we'll make one now")
+        logging.info("No annotation was given so we'll make one now")
         args.annot = args.output + ".maf2_ld4.annot"
         MakeAnnotation(
             args.bed,
@@ -296,13 +294,4 @@ if __name__ == "__main__":
             [0.0, 0.25, 0.5, 0.75, 1.0],
             args.annot,
         )
-
-    # VC = runRHE(
-    #     adj_pheno_file,
-    #     adj_pheno_file + ".rhe",
-    #     args.annot,
-    #     args.output + ".rhe.log",
-    #     args.rhemc,
-    #     args.output,
-    # )
     runSCORE(args.bed, adj_pheno_file + ".rhe", args.modelSnps, args.rhemc, args.output)
