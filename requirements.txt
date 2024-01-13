@@ -12,3 +12,5 @@ tqdm==4.60.0
 wandb==0.13.5
 tables==3.7.0
 bitsandbytes==0.35.4
+pybgen==0.7.1
+art==6.1
