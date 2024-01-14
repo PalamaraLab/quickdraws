@@ -35,37 +35,16 @@ import pdb
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
 
-
-def rename_columns(offsets, col_list):
-    df_offsets = pd.read_csv(offsets, sep="\s+")
-    df_offsets.columns = col_list
-    df_offsets.to_csv(offsets, sep="\t", index=None)
-
-
-def preprocess_offsets(offsets, pheno_columns, sample_file=None, adj_suffix=""):
+def preprocess_offsets(offsets, sample_file):
     df_concat = pd.read_csv(offsets, sep="\s+")
-    df_concat.columns = pheno_columns
+    pheno_columns = df_concat.columns.tolist().copy()
     if sample_file is not None:
         sample_file = pd.read_csv(sample_file, sep="\s+")
         sample_file = sample_file.rename(columns={"ID_1": "FID", "ID_2": "IID"})
         sample_file[["FID", "IID"]] = sample_file[["FID", "IID"]].astype("int")
         df_concat = pd.merge(df_concat, sample_file, on=["FID", "IID"])
         df_concat = df_concat[pheno_columns]
-
-    # logging.info(offsets + " : " + str(df_concat.shape))
-    df_concat.to_csv(offsets + adj_suffix, sep="\t", index=None)
-
-
-def multi_run(cmd):
-    subprocess.run(cmd, shell=True)
-    return
-
-
-def get_mask_dodgy_parallel(ldscores, bedfile, out, pheno):
-    sumstats = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
-    mask_dodgy = get_mask_dodgy(ldscores[["SNP", "LDSCORE"]], sumstats, bedfile)
-    return mask_dodgy
-
+    return df_concat
 
 def adjust_test_stats(out, pheno, correction):
     sumstats_cur = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
@@ -82,6 +61,17 @@ def adjust_test_stats(out, pheno, correction):
 
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
 
+def rege_to_qd_format():
+    df = pd.read_csv('regenie_unrel_50000_0.5_inter_2.loco', sep=' ')
+    df_transposed = df.transpose()
+    df_transposed.columns = df_transposed.iloc[0]
+    df_transposed = df_transposed[1:].reset_index()
+    df_transposed[['FID', 'IID']] = df_transposed['index'].str.split('_', expand=True)
+    df_transposed = df_transposed.drop(columns=['index'])
+    df_transposed.columns.name = ''
+    df_transposed = df_transposed.loc[0:len(df_transposed)-2]
+    df_transposed[['FID', 'IID']] = df_transposed[['FID','IID']].astype('int')
+    return df_transposed
 
 def calibrate_test_stats(
     ldscores, bedfile, unrel_sample_list, out, match_yinter, pheno
@@ -131,7 +121,7 @@ def calibrate_test_stats(
 
         prev_correction = correction.copy()
 
-    
+    sumstats_cur = sumstats_cur.drop('CHISQ_FLT', axis=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
     sumstats_cur.to_csv(
@@ -143,6 +133,34 @@ def calibrate_test_stats(
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
     return overall_correction
 
+
+def check_case_control_sep(
+    traits,
+    covar, 
+    offset,
+    unique_chrs
+):
+    pheno_columns = traits.columns.tolist()
+    pheno_mask = np.zeros(len(pheno_columns[2:]))
+    W = preprocess_covars(covar, traits[['FID','IID']])
+    for chr in unique_chrs:
+        offset_df = pd.read_csv(offset + str(chr) + ".offsets", sep="\s+")
+        for p, p_name in enumerate(pheno_columns[2:]):
+            if binary:
+                try:
+                    offset_p = offset_df[p_name].values         
+                    np.linalg.inv((W.T * offset_p * (1 - offset_p))@W)
+                    pheno_mask[p] += 1
+                except:
+                    continue
+            else:
+                pheno_mask[p] += 1
+    
+    pheno_mask = pheno_mask == len(unique_chrs)
+    pheno_columns = ['FID','IID'] + (np.array(pheno_columns[2:])[pheno_mask].tolist())
+    if not pheno_mask.all():
+        logging.info("Removed traits with complete case-control seperation, updated pheno list = " + str(pheno_columns))
+    return pheno_columns
 
 def get_test_statistics(
     bedfile,
@@ -164,85 +182,58 @@ def get_test_statistics(
 
     snp_on_disk = Bed(bedfile, count_A1=True)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
+    
     traits = pd.read_csv(phenofile, sep="\s+")
+    covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
+    offset_list = []
+    for chr in unique_chrs:
+        offset_df = pd.read_csv(offset + str(chr) + ".offsets", sep="\s+")
+        offset_list.append(offset_df)
     pheno_columns = traits.columns.tolist()
 
-    Parallel(n_jobs=n_workers)(
-        delayed(rename_columns)(offset + str(C) + ".offsets", pheno_columns)
-        for C in unique_chrs
-    )
-
-    ## Check if there is complete seperation for some traits and remove them
     if binary:
-        pheno_mask = np.zeros(len(pheno_columns[2:]))
-        W = preprocess_covars(covar, traits[['FID','IID']])
-        for chr in unique_chrs:
-            offset_df = pd.read_csv(offset + str(chr) + ".offsets", sep="\s+")
-            for p, p_name in enumerate(pheno_columns[2:]):
-                if binary:
-                    try:
-                        offset_p = offset_df[p_name].values         
-                        np.linalg.inv((W.T * offset_p * (1 - offset_p))@W)
-                        pheno_mask[p] += 1
-                    except:
-                        continue
-                else:
-                    pheno_mask[p] += 1
-        
-        pheno_mask = pheno_mask == len(unique_chrs)
-        pheno_columns = ['FID','IID'] + (np.array(pheno_columns[2:])[pheno_mask].tolist())
-        if not pheno_mask.all():
-            logging.info("Removed traits with complete case-control seperation, updated pheno list = " + str(pheno_columns))
-
-        traits[pheno_columns].to_csv(phenofile, sep = '\t', index=None, na_rep='NA')
-        covar_effects = pd.read_csv(
-            phenofile.split(".traits")[0] + ".covar_effects", sep="\s+"
-        )
-        covar_effects[pheno_columns].to_csv(phenofile.split(".traits")[0] + ".covar_effects", sep = '\t', index=None, na_rep='NA')
-        for chr in unique_chrs:
-            offset_df = pd.read_csv(offset + str(chr) + ".offsets", sep="\s+")
-            offset_df[pheno_columns].to_csv(offset + str(chr) + ".offsets", sep ='\t', index=None, na_rep='NA')
+        pheno_columns = check_case_control_sep(traits, covar, offset, unique_chr)
+        traits = traits[pheno_columns]
+        covar_effects = covar_effects[pheno_columns]
+        for offset_df in offset_list:
+            offset_df = offset_df[pheno_columns]
 
     if calibrate:
-        # Run LR-unRel using our numba implementation
         logging.info("Preprocessing traits for unrelated homogenous samples...")
         unrel_sample_traits, unrel_sample_covareffect, unrel_sample_indices = preprocess_phenotypes(phenofile, covar, bedfile, unrel_homo_file, binary)
         unrel_sample_indices = unrel_sample_indices.tolist()
-        unrel_sample_covareffect.to_csv(out + ".unrel.covar_effects", sep="\t", index=None)
-        unrel_sample_traits.to_csv(out + ".unrel.traits", sep="\t", index=None)
         if binary:
             unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]] = expit(
                 unrel_sample_covareffect[unrel_sample_covareffect.columns[2:]].values
-            )
-            unrel_sample_covareffect.to_csv(
-                out + ".unrel.expit.covar_effects", sep="\t", index=None
             )
 
         logging.info("Running linear/logistic regression on unrelated individuals...")
         get_unadjusted_test_statistics(
             bedfile,
-            [out + ".unrel.traits"] * len(unique_chrs),
-            [out + ".unrel.expit.covar_effects"] * len(unique_chrs) if binary else None,
+            unrel_sample_traits,
+            unrel_sample_covareffect if binary else None,
+            [unrel_sample_covareffect] * len(unique_chrs) if binary else None,
             covar,
             out + "_lrunrel",
             unique_chrs,
             num_threads=n_workers,
             binary=binary, 
-            firth=False, ##caution
+            firth=False,
             firth_pval_thresh=firth_pval_thresh,
         )
-    offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
+
     logging.info("Running linear/logistic regression...")
     get_unadjusted_test_statistics(
         bedfile,
-        [phenofile] * len(unique_chrs),
-        offsetFileList,
+        traits,
+        covar_effects,
+        offset_list,
         covar,
         out,
         unique_chrs,
         num_threads=n_workers,
         binary=binary,
-        firth=firth, ##caution
+        firth=firth,
         firth_pval_thresh=firth_pval_thresh,
     )
 
@@ -280,7 +271,9 @@ def get_test_statistics_bgen(
     bgenfile,
     samplefile,
     phenofile,
+    covareffectsfile,
     offset,
+    firthnullfile,
     covar,
     calibrationFile,
     extractFile,
@@ -295,9 +288,31 @@ def get_test_statistics_bgen(
 
     snp_on_disk = Bgen(bgenfile, sample=samplefile)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
-    offsetFileList = [offset + str(chr) + ".offsets" for chr in unique_chrs]
-    traits = pd.read_csv(phenofile, sep="\s+")
+
+    traits = preprocess_offsets(phenofile, samplefile)
+    covar_effects = preprocess_offsets(covareffectsfile, samplefile)
+    offset_list = Parallel(n_jobs=n_workers)(
+        delayed(preprocess_offsets)(offset + str(C) + ".offsets", samplefile)
+        for C in unique_chrs
+    )
+    if firth:
+        firth_null_list = Parallel(n_jobs=n_workers)(
+            delayed(preprocess_offsets)(firthnullfile + str(C) + ".firth_null", samplefile)
+            for C in unique_chrs
+        )
+    else:
+        firth_null_list = []
     pheno_columns = traits.columns.tolist()
+
+    if binary:
+        pheno_columns = check_case_control_sep(traits, covar, offset, unique_chr)
+        traits = traits[pheno_columns]
+        covar_effects = covar_effects[pheno_columns]
+        for offset_df in offset_list:
+            offset_df = offset_df[pheno_columns]
+        if firth:
+            for firth_null_df in firth_null_list:
+                firth_null_df = firth_null_df[pheno_columns]
 
     if calibrationFile is not None:
         calibration_factors = np.loadtxt(calibrationFile)
@@ -305,43 +320,14 @@ def get_test_statistics_bgen(
     else:
         calibration_factors = np.ones(len(traits.columns.tolist()) - 2)
 
-    Parallel(n_jobs=n_workers)(
-        delayed(preprocess_offsets)(
-            offset + str(C) + ".offsets",
-            pheno_columns,
-            samplefile,
-            adj_suffix=".preprocessed",
-        )
-        for C in unique_chrs
-    )
-    preprocess_offsets(
-        phenofile,
-        pheno_columns,
-        samplefile,
-        adj_suffix=str(unique_chrs) + ".preprocessed",
-    )
-    preprocess_offsets(
-        phenofile.split(".traits")[0] + ".covar_effects",
-        pheno_columns,
-        samplefile,
-        adj_suffix=str(unique_chrs) + ".preprocessed",
-    )
-    if firth:
-        Parallel(n_jobs=n_workers)(
-            delayed(preprocess_offsets)(
-                offset + str(C) + ".offsets.firth_null",
-                pheno_columns,
-                samplefile,
-                adj_suffix=".preprocessed",
-            )
-            for C in unique_chrs
-        )
+    
     logging.info("Running linear/logistic regression...")
     get_unadjusted_test_statistics_bgen(
         bgenfile,
         samplefile,
-        [phenofile + str(unique_chrs) + ".preprocessed"] * len(unique_chrs),
-        [offset + ".preprocessed" for offset in offsetFileList],
+        traits,
+        covar_effects,
+        offset_list,
         covar,
         out,
         unique_chrs,
@@ -350,7 +336,7 @@ def get_test_statistics_bgen(
         binary=binary,
         firth=firth,
         firth_pval_thresh=firth_pval_thresh,
-        firth_null=[offset + ".firth_null.preprocessed" for offset in offsetFileList],
+        firth_null=firth_null_list,
     )
 
     if calibration_factors.shape == ():
@@ -365,9 +351,9 @@ def get_test_statistics_bgen(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--bed", "-g", help="prefix for bed/bim/fam files", type=str)
-    parser.add_argument("--output_step1", help="Filename of the offsets file", type=str)
+    parser.add_argument("--out_step1", help="Filename of the offsets file", type=str)
     parser.add_argument(
-        "--covar",
+        "--covarFile",
         "-c",
         help='file with covariates; should be in "FID,IID,Var1,Var2,..." format and tsv',
         type=str,
@@ -395,7 +381,7 @@ if __name__ == "__main__":
         type=str,
     )
     parser.add_argument(
-        "--output",
+        "--out",
         "-o",
         help="prefix for where to save any results or files",
         default="out",
@@ -436,7 +422,7 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(message)s",
         handlers=[
-            logging.FileHandler(args.output + ".log"),
+            logging.FileHandler(args.out + ".log"),
             logging.StreamHandler()
         ]
     )
@@ -444,7 +430,7 @@ if __name__ == "__main__":
     logging.info("Copyright (c) 2024 Hrushikesh Loya and Pier Palamara.")
     logging.info("Distributed under the GPLv3 License.")
     logging.info("")
-    logging.info("Logs saved in: " + str(args.output + ".step2.log"))
+    logging.info("Logs saved in: " + str(args.out + ".step2.log"))
     logging.info("")
 
     logging.info("Options in effect: ")
@@ -457,9 +443,10 @@ if __name__ == "__main__":
     logging.info("#### Start Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
     logging.info("")
 
-    offsets_file = args.output_step1 + "loco_chr"
-    traits = args.output_step1 + ".traits"
-    covareffects = args.output_step1 + ".covar_effects"
+    offsets_file = args.out_step1 + "loco_chr"
+    traits = args.out_step1 + ".traits"
+    covareffects = args.out_step1 + ".covar_effects"
+    firth_null_file = args.out_step1
 
     assert (args.calibrate and args.unrel_sample_list is not None) or (not args.calibrate)
     "Provide a list of unrelated homogenous sample if you wish to calibrate"
@@ -476,9 +463,9 @@ if __name__ == "__main__":
             offsets_file,
             args.unrel_sample_list,
             args.ldscores,
-            args.covar,
+            args.covarFile,
             args.calibrate,
-            args.output,
+            args.out,
             args.binary,
             args.firth,
             args.firth_pval_thresh,
@@ -488,16 +475,18 @@ if __name__ == "__main__":
             args.bgen,
             args.sample,
             traits,
+            covareffects,
             offsets_file,
-            args.covar,
+            firth_null_file,
+            args.covarFile,
             args.calibrationFile,
             args.extract,
-            args.output,
+            args.out,
             args.binary,
             args.firth,
             args.firth_pval_thresh,
         )
-    logging.info("#### Step 2. done in: " + str(time.time() - st) + " secs ####")
+    logging.info("#### Step 2. Done in: " + str(time.time() - st) + " secs ####")
     logging.info("")
     logging.info("#### End Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
     logging.info("")

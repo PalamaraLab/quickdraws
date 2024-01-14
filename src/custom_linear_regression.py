@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from pysnptools.snpreader import Bed
 from pysnptools.distreader import Bgen
-from pybgen import PyBGEN
+from pybgen import ParallelPyBGEN as PyBGEN
 from scipy.stats import chi2
 from tqdm import tqdm
 import numba
@@ -40,7 +40,7 @@ def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, o
     se = np.abs(beta) / np.sqrt(chisq)
     pval = chi2.sf(chisq, df=1)
     for pheno_no, pheno in enumerate(pheno_names):
-        bim["BETA"] = -beta[pheno_no]
+        bim["BETA"] = beta[pheno_no]
         bim["SE"] = se[pheno_no]
         bim["CHISQ"] = chisq[pheno_no]
         bim["P"] = pval[pheno_no]
@@ -52,10 +52,10 @@ def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, o
         )
 
 def write_sumstats_file_bgen(
-    snp_on_disk, pheno_names, num_samples, afreq, beta, chisq, out
+    snp_on_disk, bgenfile, pheno_names, num_samples, afreq, beta, chisq, out
 ):
     bim = pd.DataFrame()
-    bim["#CHROM"] = np.array(snp_on_disk.pos[:, 0], dtype="int")
+    bim["CHR"] = np.array(snp_on_disk.pos[:, 0], dtype="int")
     bim["SNP"] = snp_on_disk.sid
     bim["GENPOS"] = snp_on_disk.pos[:, 1]
     bim["POS"] = snp_on_disk.pos[:, 2]
@@ -63,12 +63,27 @@ def write_sumstats_file_bgen(
     bim["ALT_FREQS"] = afreq
     se = np.abs(beta) / np.sqrt(chisq)
     pval = chi2.sf(chisq, df=1)
-    # 
-    #f = PyBGEN("ukb_imp_chr22_v3.bgen")
-    #f.get_variant('rs78222150')[0][0].a1  ## ref 
-    #f.get_variant('rs78222150')[0][0].a2  ## alt
+    bim[['SNP_0', 'SNP_1']]= bim['SNP'].str.split(',', expand = True)
+    try:
+        bim[['base_pair', 'A1', 'A2']] = bim['SNP_0'].str.split('_', expand = True)
+    except:
+        bim[['base_pair', 'A1', 'A2']] = np.nan
+    
+    bim = bim.drop(columns=['SNP', 'GENPOS', 'base_pair'])
+    bim = bim.rename(columns = {'SNP_1':'SNP'})
+
+    ## Find Ref and Alt for SNPs not found by pysnptools
+    if bim['A1'].isna().any():
+        with PyBGEN(bgenfile) as f:
+            iterator = f.iter_variants_by_names(bim.loc[bim['A1'].isna(), 'SNP'].values)
+            name_a1_a2_dict = {}
+            for var in iterator:
+                name_a1_a2_dict[var[0].name] = [var[0].a1, var[0].a2]
+            for index in bim.index[bim['A1'].isna()]:
+                bim.loc[index, ['A1','A2']] = name_a1_a2_dict[bim.loc[index, 'SNP']]
+
     for pheno_no, pheno in enumerate(pheno_names):
-        bim["BETA"] = -beta[pheno_no]
+        bim["BETA"] = beta[pheno_no]
         bim["SE"] = se[pheno_no]
         bim["CHISQ"] = chisq[pheno_no]
         bim["P"] = pval[pheno_no]
@@ -162,21 +177,24 @@ def firth_parallel(
     beta_out[pheno_mask] = beta_firth
     return chisq_out, beta_out
 
-def firth_null_parallel(offsetFile, Y, covar_effects, covars):
-    offset = pd.read_csv(offsetFile, sep="\s+")
+def firth_null_parallel(offset, Y, covar_effects, covars, out):
+    offset_columns = offset.columns.tolist()
     iid_fid = offset[["FID", "IID"]]
     offset = offset[offset.columns[2:]].values.astype("float32")
     random_effects = logit(offset) - covar_effects
     pred_covars, _, _ = firth_logit_covars(covars, Y, random_effects)
-    pd.concat([iid_fid, pd.DataFrame(pred_covars)], axis=1).to_csv(
-        offsetFile + ".firth_null", sep="\t", index=None
+    dfc = pd.concat([iid_fid, pd.DataFrame(pred_covars)], axis=1)
+    dfc.columns = offset_columns
+    dfc.to_csv(
+        out + ".firth_null", sep="\t", index=None
     )
     return pred_covars
 
 def get_unadjusted_test_statistics(
     bedFile,
-    phenoFileList,
-    offsetFileList,
+    pheno,
+    covar_effects,
+    offset_list,
     covarFile,
     out,
     unique_chrs,
@@ -192,7 +210,6 @@ def get_unadjusted_test_statistics(
     snp_on_disk = Bed(bedFile, count_A1=True)
     chr_map = np.array(snp_on_disk.pos[:, 0], dtype="int")  ## chr_no
 
-    pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     samples_dict = {}
     for i, fid in enumerate(snp_on_disk.iid[:, 0]):
         samples_dict[int(fid)] = i
@@ -211,29 +228,25 @@ def get_unadjusted_test_statistics(
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
-    covar_effects = pd.read_csv(
-        phenoFileList[0].split(".traits")[0] + ".covar_effects", sep="\s+"
-    )
-    covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
 
     if binary and firth:
+        covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
         pred_covars_arr = Parallel(n_jobs=num_threads)(
             delayed(firth_null_parallel)(
-                offsetFileList[chr_no], Y, covar_effects, covars
+                offset_list[chr_no], Y, covar_effects, covars, out + str(chr)
             )
-            for chr_no in range(len(np.unique(chr_map)))
+            for chr_no, chr in enumerate(np.unique(chr_map))
         )
     prev = 0
     for chr_no, chr in enumerate(np.unique(chr_map)):
         ## read offset file and adjust phenotype file
         try:
-            offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
+            offset = offset_list[chr_no]
             offset = offset[offset.columns[2:]].values.astype("float32")
         except:
             offset = None
 
-        pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
         Y = pheno[pheno.columns[2:]].values.astype("float32")
         # if not binary:
         #     Y -= np.mean(Y, axis=0)
@@ -301,8 +314,9 @@ def get_unadjusted_test_statistics(
 def get_unadjusted_test_statistics_bgen(
     bgenFile,
     sampleFile,
-    phenoFileList,
-    offsetFileList,
+    pheno,
+    covar_effects,
+    offset_list,
     covarFile,
     out,
     unique_chrs,
@@ -349,7 +363,6 @@ def get_unadjusted_test_statistics_bgen(
 
         del snp_dict
 
-    pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     samples_dict = {}
     for i, fid in enumerate(fid_iid[:, 0]):
         samples_dict[int(fid)] = i
@@ -371,20 +384,13 @@ def get_unadjusted_test_statistics_bgen(
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
-    pheno = pd.read_csv(phenoFileList[0], sep="\s+")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
 
     if binary and firth and firth_null is None:
-        covar_effects = pd.read_csv(
-            phenoFileList[0].split(".traits")[0]
-            + ".covar_effects"
-            + phenoFileList[0].split(".traits")[1],
-            sep="\s+",
-        )
         covar_effects = covar_effects[covar_effects.columns[2:]].values.astype("float32")
         pred_covars_arr = Parallel(n_jobs=num_threads)(
             delayed(firth_null_parallel)(
-                offsetFileList[chr_no], Y, covar_effects, covars
+                offset_list[chr_no], Y, covar_effects, covars
             )
             for chr_no in range(len(np.unique(chr_map)))
         )
@@ -393,7 +399,7 @@ def get_unadjusted_test_statistics_bgen(
         for chr_no in range(len(np.unique(chr_map))):
             firth_null_chr = pd.read_csv(firth_null[chr_no], sep="\s+")
             mdf = pd.merge(
-                pd.read_csv(offsetFileList[chr_no], sep="\s+")[["IID", "FID"]],
+                offset_list[chr_no][["IID", "FID"]],
                 firth_null_chr,
                 on=["FID", "IID"],
             )
@@ -403,12 +409,11 @@ def get_unadjusted_test_statistics_bgen(
     for chr_no, chr in enumerate(unique_chrs):
         ## read offset file and adjust phenotype file
         try:
-            offset = pd.read_csv(offsetFileList[chr_no], sep="\s+")
+            offset = offset_list[chr_no]
             offset = np.array(offset[offset.columns[2:]].values, dtype="float32")
         except:
             offset = None
 
-        pheno = pd.read_csv(phenoFileList[chr_no], sep="\s+")
         Y = pheno[pheno.columns[2:]].values.astype("float32")
         # if not binary:
         #     Y -= np.mean(Y, axis=0)
@@ -466,6 +471,7 @@ def get_unadjusted_test_statistics_bgen(
 
     write_sumstats_file_bgen(
         snp_on_disk,
+        bgenFile,
         pheno.columns[2:],
         snp_on_disk.shape[0],
         afreq_arr,
@@ -476,23 +482,4 @@ def get_unadjusted_test_statistics_bgen(
 
 
 if __name__ == "__main__":
-    bedFile = "simulate/ukbb50k_unrel_gbp"
-    residualFileList = []
-    for chr in range(1, 23):
-        residualFileList.append(
-            "output/exact_loco_blr_unrel_gbploco_chr" + str(chr) + ".residuals"
-        )
-    covarFile = "simulate/covariates.tab"
-    out = "output/test_blr_all"
-
-    bgenFile = "ukbb_gbp/ukb_imp_chr18_v3.bgen"
-    sampleFile = "/well/palamara/projects/UKBB_APPLICATION_43206/new_copy/data_download/ukb22828_c22_b0_v3_s487276.sample"
-    get_unadjusted_test_statistics_bgen(
-        bgenFile,
-        sampleFile,
-        residualFileList,
-        covarFile,
-        out,
-        np.arange(1, 23),
-        num_threads=8,
-    )
+    pass

@@ -241,6 +241,7 @@ class HDF5Dataset:
         self.chr = torch.as_tensor(np.array(self.h5py_file["chr"])).float()
         self.iid = np.array(self.h5py_file["iid"], dtype=int)
         self.length = len(self.output)
+        self.pheno_names = [p.decode() for p in self.h5py_file['pheno_names']]
         if not lowmem:
             self.h5py_file.close()
 
@@ -362,6 +363,7 @@ class Trainer:
             num_workers=self.args.num_workers,
             pin_memory=self.args.num_workers > 0,
         )
+        self.pheno_names = train_dataset.pheno_names
 
     ## masked BCE loss function
     def masked_bce_loss(self, preds, labels, h2=0.5):
@@ -488,7 +490,7 @@ class Trainer:
             
             for chr_no, chr in enumerate(self.unique_chr_map):
                 df_concat = pd.concat(
-                    [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no])], axis=1
+                    [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no], columns=self.pheno_names)], axis=1
                 )
                 pd.DataFrame(df_concat).to_csv(
                     out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
