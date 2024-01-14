@@ -1,33 +1,33 @@
 #!/bin/bash
 
 bed="example/example"
-pheno="example/phenotypes.txt"
-covar="example/covariates.txt"
+phenoFile="example/phenotypes.txt"
+covarFile="example/covariates.txt"
 bgen="example/example.bgen"
 sample="example/example.sample"
 
 # step 1: run model fitting (step 1) on genotypes and phenotypes
 python src/quickdraws_step1.py \
-   --output output/qd \
+   --out output/qd \
    --bed ${bed} \
-   --pheno ${pheno} \
-   --covar ${covar} \
-   --h2_grid
+   --phenoFile ${phenoFile} \
+   --covarFile ${covarFile} \
+   --h2_grid \
+   --predBetasFlag
 
 ## step 2: get association stats for SNPs in bgen file
 python src/quickdraws_step2.py \
-    --output output/qd \
+    --out output/qd \
     --bed ${bed} \
-    --output_step1 output/qd \
-    --covar ${covar} \
+    --out_step1 output/qd \
+    --covarFile ${covarFile} \
     --unrel_sample_list example/unrelated_FID_IID.txt \
 
 python src/quickdraws_step2.py \
-    --output output/qd_imputed \
-    --bed ${bed} \
+    --out output/qd_imputed \
     --bgen ${bgen} \
     --sample ${sample} \
-    --output_step1 output/qd \
+    --out_step1 output/qd \
     --calibrationFile output/qd.calibration \
-    --covar ${covar} \
+    --covarFile ${covarFile} \
     --unrel_sample_list example/unrelated_FID_IID.txt

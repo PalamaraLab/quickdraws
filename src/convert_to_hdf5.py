@@ -122,6 +122,7 @@ def convert_to_hdf5(
         # compression="gzip",
         dtype=np.uint8,
     )
+    _ = h1.create_dataset("pheno_names", data=pheno.columns[2:].tolist())
     dset3 = h1.create_dataset("phenotype", data=y, dtype=float)
     dset35 = h1.create_dataset("covar_effect", data=z, dtype=float)
     dset4 = h1.create_dataset("geno_covar_effect", data=geno_covar_effect, dtype=float)
@@ -153,6 +154,7 @@ def convert_to_hdf5(
         ## np.packbits() requires most time (~ 80%)
 
     h1.close()
+    logging.info("Done saving the genotypes to hdf5 file " + str(out + '.hdf5'))
     return out + ".hdf5"
 
 if __name__ == "__main__":
@@ -161,20 +163,20 @@ if __name__ == "__main__":
         "--bed", "-g", help="prefix for bed/bim/fam files", type=str, default=None
     )
     parser.add_argument(
-        "--output",
+        "--out",
         "-o",
         help="prefix for where to save any results or files",
         default=None,
     )
     parser.add_argument(
-        "--pheno",
+        "--phenoFile",
         "-p",
         help='phenotype file; should be in "FID,IID,Trait" format and tsv',
         type=str,
         default=None,
     )
     parser.add_argument(
-        "--covar",
+        "--covarFile",
         "-c",
         help='file with covariates; should be in "FID,IID,Var1,Var2,..." format and tsv',
         type=str,
@@ -201,12 +203,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if args.bed is not None and args.pheno is not None:
+    if args.bed is not None and args.phenoFile is not None:
         Traits, covar_effects, sample_indices = preprocess_phenotypes(
-            args.pheno, args.covar, args.bed, args.removeFile, args.binary
+            args.phenoFile, args.covarFile, args.bed, args.removeFile, args.binary
         )
-        PreparePhenoRHE(Traits, covar_effects, args.bed, args.output, None)
+        PreparePhenoRHE(Traits, covar_effects, args.bed, args.out, None)
 
         filename = convert_to_hdf5(
-            args.bed, args.covar, sample_indices, args.output, args.modelSnps
+            args.bed, args.covarFile, sample_indices, args.out, args.modelSnps
         )

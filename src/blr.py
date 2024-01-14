@@ -280,6 +280,7 @@ class Trainer:
         validate_every=1,
         chr_map=None,
         pheno_for_model=None,
+        predBetasFlag=False
     ):
         self.args = args
         if h2.ndim == 2:
@@ -298,19 +299,23 @@ class Trainer:
         self.alpha = alpha
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().cuda()**2
         if self.chr_map is not None:
-            self.unique_chr_map = torch.unique(self.chr_map)
-            self.num_chr = len(self.unique_chr_map)
-
+            self.unique_chr_map = torch.unique(self.chr_map).tolist()
             ## check if chr_map has chrs in chunks:
             chr_map_shifted = torch.as_tensor(
                 self.chr_map.tolist()[1:] + [torch.inf]
             ).to(self.chr_map.device)
-            assert torch.sum((self.chr_map - chr_map_shifted) != 0) == self.num_chr
+            assert torch.sum((self.chr_map - chr_map_shifted) != 0) == len(self.unique_chr_map)
 
             self.chr_loc = []
             for chr in self.unique_chr_map:
                 self.chr_loc.append(int(min(torch.where(self.chr_map == chr)[0])))
             self.chr_loc.append(len(chr_map))
+
+            if predBetasFlag: 
+                self.unique_chr_map.append(max(self.unique_chr_map) + 1)
+                self.chr_loc.append(len(self.chr_map))
+            self.num_chr = len(self.unique_chr_map)
+
 
         if pheno_for_model is not None:
             self.pheno_for_model = pheno_for_model
@@ -481,22 +486,22 @@ class Trainer:
                         )
                 prev += len(input)
             
-            # for chr_no, chr in enumerate(torch.unique(self.chr_map)):
-            #     df_concat = pd.concat(
-            #         [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no])], axis=1
-            #     )
-            #     pd.DataFrame(df_concat).to_csv(
-            #         out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
-            #     )
-            
-            ### Saving it Regenie style...
-            for d in range(dim_out):
+            for chr_no, chr in enumerate(self.unique_chr_map):
                 df_concat = pd.concat(
-                    [self.df_iid_fid, pd.DataFrame(loco_estimates[:,:, d])], axis=0
+                    [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no])], axis=1
                 )
                 pd.DataFrame(df_concat).to_csv(
-                    out + "_" + str(d) + ".loco", sep=" ", index=None
+                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
                 )
+            
+            ### Saving it Regenie style...
+            # for d in range(dim_out):
+            #     df_concat = pd.concat(
+            #         [self.df_iid_fid, pd.DataFrame(loco_estimates[:,:, d])], axis=0
+            #     )
+            #     pd.DataFrame(df_concat).to_csv(
+            #         out + "_" + str(d+1) + ".loco", sep=" ", index=None
+            #     )
 
     def train_epoch(self, epoch):
         for input, covar_effect, label in self.train_dataloader:
@@ -658,9 +663,15 @@ def initialize_model(
     chr_map=None,
     mu=None,
     spike=None,
+    predBetasFlag=False
 ):
     model_list = []
     num_snps = len(std_genotype)
+    if chr_map is not None:
+        unique_chr = torch.unique(chr_map).tolist()
+        if predBetasFlag: 
+            unique_chr.append(max(unique_chr) + 1)
+
     if h2.ndim == 2:
         std_genotype = std_genotype.unsqueeze(0)
         std_y = std_y.unsqueeze(1)
@@ -694,7 +705,7 @@ def initialize_model(
         assert posterior_sig.shape == prior_sig.shape
         if loco == "exact":
             assert len(dim_out)
-            for chr_no, chr in enumerate(torch.unique(chr_map)):
+            for chr_no, chr in enumerate(unique_chr):
                 model = Model(
                     dim_in=len(chr_map[chr_map != chr]),
                     dim_out=int(sum(dim_out == alpha_no)),
@@ -847,7 +858,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
             entity="hrushikeshloya",
             job_type=args.wandb_job_type,
             config=args,
-            dir=args.output,
+            dir=args.out,
         )
         # Save ENV variables
         with (Path(wandb.run.dir) / "env.txt").open("wt") as f:
@@ -902,8 +913,15 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
             args, alpha, h2, train_dataset, test_dataset, device=device
         )
 
-    np.save(args.output + ".blup", mu * spike)
-    np.save(args.output + ".alpha", np.array(alpha)[np.argmax(output_r2, axis=1)])
+    np.savetxt(args.out + ".alpha", np.array(alpha)[np.argmax(output_r2, axis=1)])
+    if args.h2_grid:
+        np.savetxt(args.out + ".h2", np.array(h2))
+    
+    logging.info("")
+    logging.info("Heritability inferred for traits = " + str(np.array(h2)))
+    logging.info("")
+    logging.info("Sparsity inferred for traits = " + str(np.array(alpha)[np.argmax(output_r2, axis=1)]))
+    logging.info("")
 
     del train_dataset.hap1
     del train_dataset.hap2
@@ -949,6 +967,10 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     std_y = torch.sqrt(1 - torch.std(full_dataset.covar_effect, axis=0).float()**2)
     h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
     chr_map = full_dataset.chr  # .to(device)
+    num_chr = len(torch.unique(chr_map))
+
+    if args.predBetasFlag: num_chr += 1
+
     model_list = initialize_model(
         alpha,
         std_genotype,
@@ -961,6 +983,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         chr_map,
         mu=mu,
         spike=spike,
+        predBetasFlag=args.predBetasFlag
     )
     del mu
     del spike
@@ -972,7 +995,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     start_time = time.time()
     lr_loco = []
     for a in alpha:
-        for chr_no in range(len(torch.unique(chr_map))):
+        for chr_no in range(num_chr):
             lr_loco.append(lr_dict[a])
 
     trainer = Trainer(
@@ -987,6 +1010,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         validate_every=-1,
         chr_map=chr_map.to(device),
         pheno_for_model=pheno_for_model,
+        predBetasFlag=args.predBetasFlag
     )
     for epoch in tqdm(range(args.num_epochs)):
         _ = trainer.train_epoch_loco(epoch)
@@ -995,16 +1019,49 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     logging.info("Done fitting the model in: " + str(time.time() - start_time) + " secs")
 
-    logging.info("Saving exact LOCO estimates..")
+    logging.info("Saving exact LOCO estimates...")
     start_time = time.time()
     trainer.save_exact_blup_estimates(
-        np.argmax(output_r2_subset, axis=1), args.output
+        np.argmax(output_r2_subset, axis=1), args.out
     )
     logging.info(
         "Done writing exact LOCO estimates in: "
         + str(time.time() - start_time)
         + " secs"
     )
+
+    if args.predBetasFlag:
+        logging.info("Calculating the BLUP Betas using the entire data...")
+        dim_out = full_dataset.output.shape[1]
+        best_alpha = np.argmax(output_r2_subset, axis=1)
+        
+        mu_list = np.zeros((dim_out, len(std_genotype)))
+        spike_list = np.zeros((dim_out, len(std_genotype)))
+        for prs_no in range(dim_out):
+            mu = (
+                trainer.model_list[best_alpha[prs_no]*num_chr + num_chr - 1]
+                .fc1.weight[prs_no]
+                .cpu()
+                .detach()
+                .numpy()
+            )
+            spike = (
+                torch.clamp(
+                    trainer.model_list[best_alpha[prs_no]*num_chr + num_chr - 1].sc1.spike1[prs_no],
+                    1e-6,
+                    1.0 - 1e-6,
+                )
+                .cpu()
+                .detach()
+                .numpy()
+            )
+            mu_list[prs_no] = mu
+            spike_list[prs_no] = spike
+        
+        np.savetxt(args.out + ".blup", mu * spike)
+
+        ## add chr=23 in initialize models
+        ## save results for chr 23, 46, so on..
 
     wandb.finish()
     if args.lowmem:
@@ -1110,17 +1167,5 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    torch.manual_seed(2)
-    torch.cuda.manual_seed_all(2)
-
-    if args.gpu is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
-
-    device = args.gpu.split(",")
-    logging.info("Using " + str(len(device)) + " GPU(s)...")
-
-    assert args.train_split < 1 and args.train_split > 0
-    h2 = np.loadtxt(args.h2_file)
-    estimates_filename = blr_spike_slab(args, h2, args.hdf5_filename)
 
 # python blr.py --hdf5_filename  --h2_file

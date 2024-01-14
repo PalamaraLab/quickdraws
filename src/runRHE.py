@@ -280,18 +280,3 @@ if __name__ == "__main__":
     )
     parser.add_argument("--rhemc", type=str, help="path to RHE-MC binary file")
     args = parser.parse_args()
-    adj_pheno_file = ".".join([args.output, "adjusted_traits", "phen"])
-    Traits, sample_indices = preprocess_phenotypes(
-        args.pheno, args.covar, args.bed, None
-    )
-    PreparePhenoRHE(Traits, args.bed, adj_pheno_file, None)
-    if args.make_annot:
-        logging.info("No annotation was given so we'll make one now")
-        args.annot = args.output + ".maf2_ld4.annot"
-        MakeAnnotation(
-            args.bed,
-            [0.01, 0.05, 0.5],
-            [0.0, 0.25, 0.5, 0.75, 1.0],
-            args.annot,
-        )
-    runSCORE(args.bed, adj_pheno_file + ".rhe", args.modelSnps, args.rhemc, args.output)

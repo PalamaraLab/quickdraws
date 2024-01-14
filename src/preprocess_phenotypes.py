@@ -166,10 +166,11 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
     Trait_covar[["FID", "IID"] + pheno_columns].to_csv(
         filename + ".traits", index=None, sep="\t", na_rep="NA"
     )
+    logging.info("Saving the remaining phenotypes in " + str(filename + ".traits"))
     covar_effects = Trait_covar[["FID", "IID"] + covar_columns]
     covar_effects.columns = ["FID", "IID"] + pheno_columns
     covar_effects.to_csv(filename + ".covar_effects", index=None, sep="\t", na_rep="NA")
-
+    logging.info("Saving the covariate effects on phenotypes in " + str(filename + ".covar_effects"))
     snp_on_disk = Bed(bed, count_A1=True)
 
     if unrel_homo_samples is not None:
@@ -195,6 +196,7 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
     df_rhe.FID = df_rhe.FID.astype("int")
     df_rhe.IID = df_rhe.IID.astype("int")
     df_rhe.to_csv(filename + ".rhe", index=None, sep="\t", na_rep="NA")
+    logging.info("Saving the postprocessed phenotypes (to be used by RHE) in " + str(filename + ".rhe"))
 
 
 if __name__ == "__main__":
@@ -219,4 +221,3 @@ if __name__ == "__main__":
         type=str,
     )
     args = parser.parse_args()
-    preprocess_phenotypes(args.pheno, args.covar, args.bed, args.keepfile)
