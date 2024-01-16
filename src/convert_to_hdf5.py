@@ -18,17 +18,22 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
     snp_on_disk = Bed(bed, count_A1=True)
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
     chunk_size = min(chunk_size, snp_on_disk.shape[1])
-    df_covar = pd.read_csv(covars, sep="\s+")
-    df_covar = pd.merge(
-        pd.DataFrame(snp_on_disk.iid[:, 0].astype("int"), columns=["FID"]),
-        df_covar,
-        on=["FID"],
-    )
-    df_covar = df_covar.loc[:, df_covar.std() > 0]
-    df_covar["ALL_CONST"] = 1
-    df_covar = df_covar.fillna(df_covar.median())
-    covars = df_covar[df_covar.columns[2:]].values
+    if covars is None:
+        covars = np.ones((len(sample_indices), 1))
+    else:
+        df_covar = pd.read_csv(covars, sep="\s+")
+        df_covar = pd.merge(
+            pd.DataFrame(snp_on_disk.iid[:, 0].astype("int"), columns=["FID"]),
+            df_covar,
+            on=["FID"],
+        )
+        df_covar = df_covar.loc[:, df_covar.std() > 0]
+        df_covar["ALL_CONST"] = 1
+        df_covar = df_covar.fillna(df_covar.median())
+        covars = df_covar[df_covar.columns[2:]].values
+    
     K = np.linalg.inv(covars.T @ covars)
+
     geno_covar_effect = np.zeros((covars.shape[1], snp_on_disk.shape[1]))
     xtx = np.zeros(snp_on_disk.shape[1])
     for i in tqdm(range(0, snp_on_disk.shape[1], chunk_size)):

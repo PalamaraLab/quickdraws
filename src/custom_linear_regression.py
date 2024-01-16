@@ -10,11 +10,14 @@ import copy
 import time
 import pdb
 from firth_logistic import firth_logit_covars, firth_logit_svt
-from scipy.special import logit
+from scipy.special import expit
 from joblib import Parallel, delayed
 import os
 
 def preprocess_covars(covarFile, iid_fid):
+    if covarFile is None:
+        covars = np.ones((len(iid_fid),1), dtype='float32')
+        return covars
     covars = pd.read_csv(covarFile, sep="\s+")
     covars = pd.merge(
         pd.DataFrame(iid_fid.astype("int"), columns=["FID", "IID"]),
@@ -181,7 +184,7 @@ def firth_null_parallel(offset, Y, covar_effects, covars, out):
     offset_columns = offset.columns.tolist()
     iid_fid = offset[["FID", "IID"]]
     offset = offset[offset.columns[2:]].values.astype("float32")
-    random_effects = logit(offset) - covar_effects
+    random_effects = offset - covar_effects
     pred_covars, _, _ = firth_logit_covars(covars, Y, random_effects)
     dfc = pd.concat([iid_fid, pd.DataFrame(pred_covars)], axis=1)
     dfc.columns = offset_columns
@@ -264,7 +267,7 @@ def get_unadjusted_test_statistics(
             )
             ## preprocess genotype and perform linear regression
             if binary:
-                beta, chisq, afreq = MyLogRegr(X, Y, covars, offset)
+                beta, chisq, afreq = MyLogRegr(X, Y, covars, expit(offset))
             else:
                 beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
 
@@ -397,7 +400,7 @@ def get_unadjusted_test_statistics_bgen(
     elif binary and firth and firth_null is not None:
         pred_covars_arr = []
         for chr_no in range(len(np.unique(chr_map))):
-            firth_null_chr = pd.read_csv(firth_null[chr_no], sep="\s+")
+            firth_null_chr = firth_null[chr_no]
             mdf = pd.merge(
                 offset_list[chr_no][["IID", "FID"]],
                 firth_null_chr,
@@ -432,7 +435,7 @@ def get_unadjusted_test_statistics_bgen(
             )
             ## preprocess genotype and perform linear regression
             if binary:
-                beta, chisq, afreq = MyLogRegr(X, Y, covars, offset)
+                beta, chisq, afreq = MyLogRegr(X, Y, covars, expit(offset))
             else:
                 beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
 

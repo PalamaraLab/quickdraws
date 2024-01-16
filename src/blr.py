@@ -292,8 +292,10 @@ class Trainer:
         self.model_list = model_list
         self.num_samples = train_dataset.length
         self.df_iid_fid = pd.DataFrame(
-            np.array(train_dataset.iid, dtype=int), columns=["FID", "IID"]
+            train_dataset.iid, columns=["FID", "IID"]
         )
+        self.df_iid_fid[['FID','IID']] = self.df_iid_fid[['FID','IID']].astype('str')
+        self.df_iid_fid = self.df_iid_fid['FID'].str.cat(self.df_iid_fid['IID'].values,sep='_')
         self.validate_every = validate_every if validate_every > 0 else 1
         self.never_validate = validate_every < 0
         self.chr_map = chr_map
@@ -474,36 +476,28 @@ class Trainer:
                     preds = (input[:, self.chr_map != self.unique_chr_map[chr_no]]) @ (
                         beta.T
                     )
-                    ## caution: remove sigmoid to save in regenie format
-                    if self.args.binary:
-                        loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = (
-                            torch.sigmoid(preds + covar_effect[:, phen_no])
-                            .detach()
-                            .cpu()
-                            .numpy()
-                        )
-                    else:
-                        loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = (
-                            (covar_effect[:, phen_no] + preds).detach().cpu().numpy()
-                        )
+                    ## caution: remove sigmoid and covar_effect to save in regenie format
+                    loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = preds.detach().cpu().numpy()
                 prev += len(input)
             
-            for chr_no, chr in enumerate(self.unique_chr_map):
-                df_concat = pd.concat(
-                    [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no], columns=self.pheno_names)], axis=1
-                )
-                pd.DataFrame(df_concat).to_csv(
-                    out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
-                )
-            
-            ### Saving it Regenie style...
-            # for d in range(dim_out):
+            # for chr_no, chr in enumerate(self.unique_chr_map):
             #     df_concat = pd.concat(
-            #         [self.df_iid_fid, pd.DataFrame(loco_estimates[:,:, d])], axis=0
+            #         [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no], columns=self.pheno_names)], axis=1
             #     )
             #     pd.DataFrame(df_concat).to_csv(
-            #         out + "_" + str(d+1) + ".loco", sep=" ", index=None
+            #         out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
             #     )
+            
+            ## Saving it Regenie style...
+            for d in range(dim_out):
+                df = pd.DataFrame(loco_estimates[:,:, d])
+                df.columns = self.df_iid_fid.values
+                df_concat = pd.concat(
+                    [pd.DataFrame(columns=['FID_IID'], data = self.unique_chr_map).astype('int'), df], axis=1
+                )
+                pd.DataFrame(df_concat).to_csv(
+                    out + "_" + str(d+1) + ".loco", sep=" ", index=None
+                )
 
     def train_epoch(self, epoch):
         for input, covar_effect, label in self.train_dataloader:
@@ -761,7 +755,10 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     # logging.info("Done loading in: " + str(time.time() - start_time) + " secs")
     # Define model and enable wandb live policy
     std_genotype = torch.as_tensor(train_dataset.std_genotype).float()
-    std_y = torch.sqrt(1 - torch.std(train_dataset.covar_effect, axis=0).float()**2)
+    if args.binary:
+        std_y = 1
+    else:
+        std_y = torch.sqrt(1 - torch.std(train_dataset.covar_effect, axis=0).float()**2)
     h2 = torch.as_tensor(h2).float()
 
     model_list = initialize_model(
@@ -966,7 +963,10 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     std_genotype = torch.as_tensor(
         full_dataset.std_genotype, dtype=torch.float32
     )  # .to(device)
-    std_y = torch.sqrt(1 - torch.std(full_dataset.covar_effect, axis=0).float()**2)
+    if args.binary:
+        std_y = 1
+    else:
+        std_y = torch.sqrt(1 - torch.std(full_dataset.covar_effect, axis=0).float()**2)
     h2 = torch.as_tensor(h2, dtype=torch.float32)  # .to(device)
     chr_map = full_dataset.chr  # .to(device)
     num_chr = len(torch.unique(chr_map))
