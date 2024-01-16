@@ -14,23 +14,30 @@ from scipy.stats import norm
 import logging
 logger = logging.getLogger(__name__)
 
-def MakeAnnotation(bed, maf_bins, ld_score_percentiles, outfile=None):
+def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_percentiles, outfile=None):
     """Intermediate helper function to generate MAF / LD structured annotations. Credits: Arjun"""
     logging.info("Making annotation for accurate h2 estimation")
     try:
-        df = pd.read_csv("/well/palamara/projects/UKBB_APPLICATION_43206/new_copy/plink_missingness_regenielike_filters/ukb_app43206_500k.maf00001.score.ld", sep="\s+")
-        logging.info("MAF/LD info are loaded for {0} SNPs".format(len(df)))
+        df = pd.read_csv(maf_ldscores, sep="\s+")
     except:
         logging.exception("File with MAF-LD scores is wrong!")
         raise ValueError
+
+    bim = pd.read_csv(bed + ".bim", header=None, sep="\s+")
+    bim = bim.rename(columns={0:'CHR',1:'SNP'})
+    df = pd.merge(bim, df, on=['CHR','SNP'], how='left')
+
+    logging.info("Number of SNPs with MAF/LD information = " + str(len(df) - df['MAF'].isna().sum()))
+    is_missing = int(df['MAF'].isna().any())
+
     mafs = df.MAF.values
-    ld_scores = df.ldscore.values
-    assert mafs.size == ld_scores.size
+    ld_scores = df.LDSCORE.values
 
     # subsetting to variants in the correct MAF bin
     n_maf_bins = len(maf_bins) - 1
     n_ld_bins = len(ld_score_percentiles) - 1
-    tot_cats = np.zeros(shape=(mafs.size, n_maf_bins * n_ld_bins), dtype=np.uint8)
+    tot_cats = np.zeros(shape=(mafs.size, n_maf_bins * n_ld_bins + is_missing), dtype=np.uint8)
+
     i = 0
     for j in range(n_maf_bins):
         if j == 0:
@@ -54,24 +61,38 @@ def MakeAnnotation(bed, maf_bins, ld_score_percentiles, outfile=None):
             tot_cats[cat_idx, i] = 1
             i += 1
 
+    if is_missing > 0:
+        cat_idx = np.where(np.isnan(mafs))[0]
+        tot_cats[cat_idx, -1] = 1
+
     # remove variants from the HLA region (as they are sensitive to RHE)
-    hla = pd.read_csv(
-        bed + ".bim",
-        header=None,
-        sep="\s+",
-    )
-    hla = hla[hla[0] == 6]
+    hla = bim[bim['CHR'] == 6]
     hla = hla[hla[3] > 28.4e6]
     hla = hla[hla[3] < 33.5e6]
-    logging.info("Variants removed from HLA:", len(hla))
     tot_cats[hla.index] = 0
+
+    # remove variants not in modelSnps
+    snp_on_disk = Bed(bed, count_A1=True)
+    if snps_to_keep_filename is None:
+        total_snps = snp_on_disk.sid_count
+        snp_mask = np.ones(total_snps, dtype="bool")
+    else:
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
+        snp_dict = {}
+        total_snps = snp_on_disk.sid_count
+        snp_mask = np.zeros(total_snps, dtype="bool")
+        for snp_no, snp in enumerate(snp_on_disk.sid):
+            snp_dict[snp] = snp_no
+        for snp in snps_to_keep:
+            snp_mask[snp_dict[snp]] = True
+
+    tot_cats[np.logical_not(snp_mask)] = 0
 
     #   Make sure there are SNPs in every category
     assert np.all(np.sum(tot_cats, axis=0) > 0)
     np.savetxt(outfile, tot_cats, fmt="%d")
-
     return
-
 
 def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
     snp_on_disk = Bed(bedfile, count_A1=True)

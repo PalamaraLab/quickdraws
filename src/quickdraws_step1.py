@@ -53,10 +53,10 @@ parser.add_argument(
     type=str,
 )
 parser.add_argument(
-    "--make_annot",
-    help="Do you wish to make the annot file ?",
-    type=str_to_bool,
-    default="false",
+    "--ldscores",
+    help="Path to ld score directory in format accepted by ldsc",
+    type=str,
+    default=None
 )
 parser.add_argument(
     "--modelSnps",
@@ -250,10 +250,12 @@ else:
 if args.h2_file is None and not args.h2_grid:
     st = time.time()
     logging.info("#### Step 1b. Calculating heritability estimates using RHE ####")
-    if args.make_annot:
+    if args.ldscores is not None:
         args.annot = args.out + ".maf2_ld4.annot"
         MakeAnnotation(
             args.bed,
+            args.ldscores,
+            args.modelSnps,
             [0.01, 0.05, 0.5],
             [0.0, 0.25, 0.5, 0.75, 1.0],
             args.annot,
