@@ -22,7 +22,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from joblib import Parallel, delayed
 
-import bitsandbytes as bnb
 import gc
 import pdb
 import logging
@@ -83,7 +82,10 @@ class BBB_Linear_spike_slab(nn.Module):
         if test:
             spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
             return spike.mul(mu1)
-        eps = torch.cuda.FloatTensor(mu1.shape)
+        if device == 'cuda':
+            eps = torch.cuda.FloatTensor(mu1.shape)
+        else:
+            eps = torch.FloatTensor(mu1.shape)
         torch.randn(mu1.shape, out=eps)
         sig_eps = torch.mul(sig1, eps)
         gaussian1 = mu1 + sig_eps
@@ -91,7 +93,10 @@ class BBB_Linear_spike_slab(nn.Module):
 
         spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
         log_spike = torch.log(spike / (1 - spike))
-        unif = torch.cuda.FloatTensor(spike.shape)
+        if device == 'cuda':
+            unif = torch.cuda.FloatTensor(spike.shape)
+        else:
+            unif = torch.FloatTensor(spike.shape)
         torch.rand(spike.shape, out=unif)
         log_unif = torch.log(unif / (1 - unif))
         eta1 = log_spike + log_unif
@@ -119,7 +124,10 @@ class BBB_Linear_spike_slab(nn.Module):
         var_preactivations = (
             spike.mul(sig1.pow(2)) + spike.mul(mu1.pow(2)) - mean_preactivations.pow(2)
         )
-        eps = torch.cuda.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
+        if device == 'cuda':
+            eps = torch.cuda.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
+        else:
+            eps = torch.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
         selection = torch.stack(
             (
                 F.linear(x, mean_preactivations)
@@ -300,7 +308,7 @@ class Trainer:
         self.never_validate = validate_every < 0
         self.chr_map = chr_map
         self.alpha = alpha
-        self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().cuda()**2
+        self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().to(device)**2
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map).tolist()
             ## check if chr_map has chrs in chunks:
@@ -324,16 +332,27 @@ class Trainer:
             self.pheno_for_model = pheno_for_model
         self.optimizer_list = []
         for model_no, model in enumerate(model_list):
-            self.optimizer_list.append(
-                bnb.optim.Adam(
-                    model.parameters(),
-                    lr=lr[model_no],
-                    eps=adam_eps,
-                    weight_decay=weight_decay,
-                    betas=(0.9, 0.995),
-                    optim_bits=8,
+            if device == 'cuda':
+                self.optimizer_list.append(
+                    bnb.optim.Adam(
+                        model.parameters(),
+                        lr=lr[model_no],
+                        eps=adam_eps,
+                        weight_decay=weight_decay,
+                        betas=(0.9, 0.995),
+                        optim_bits=8,
+                    )
                 )
-            )
+            else:
+                self.optimizer_list.append(
+                    torch.optim.Adam(
+                        model.parameters(),
+                        lr=lr[model_no],
+                        eps=adam_eps,
+                        weight_decay=weight_decay,
+                        betas=(0.9, 0.995),
+                    )
+                )
         if self.args.cosine_scheduler:
             self.scheduler_list = []
             for optimizer in self.optimizer_list:
@@ -834,11 +853,13 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     for i in range(len(model_list)):
         del model_list[0]
     del model_list
-    with torch.no_grad():
-        torch.cuda.empty_cache()
-    gc.collect()
-    with torch.no_grad():
-        torch.cuda.empty_cache()
+    
+    if device == 'cuda':
+        with torch.no_grad():
+            torch.cuda.empty_cache()
+        gc.collect()
+        with torch.no_grad():
+            torch.cuda.empty_cache()
 
     if args.lowmem:
         train_dataset.close_hdf5()
@@ -848,6 +869,9 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
 
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
+    if device == 'cuda':
+        import bitsandbytes as bnb
+
     overall_start_time = time.time()
     if not args.wandb_mode == "disabled":
         logging.info("Initializing wandb to log the progress..")
@@ -936,9 +960,10 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     del test_dataset.covars
     gc.collect()
 
-    with torch.no_grad():
-        torch.cuda.empty_cache()
-    gc.collect()
+    if device == 'cuda':
+        with torch.no_grad():
+            torch.cuda.empty_cache()
+        gc.collect()
     alpha = np.array(alpha)[np.unique(np.argmax(output_r2, axis=1))]
 
     output_r2_subset = output_r2[:, np.unique(np.argmax(output_r2, axis=1))]
@@ -990,8 +1015,10 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     del mu
     del spike
     gc.collect()
-    with torch.no_grad():
-        torch.cuda.empty_cache()
+    
+    if device == 'cuda':
+        with torch.no_grad():
+            torch.cuda.empty_cache()
 
     logging.info("Calculating estimates using entire dataset...")
     start_time = time.time()
