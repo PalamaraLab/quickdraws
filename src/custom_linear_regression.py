@@ -36,7 +36,7 @@ def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, o
         bedFile + ".bim",
         sep="\s+",
         header=None,
-        names=["#CHROM", "SNP", "GENPOS", "POS", "A1", "A2"],
+        names=["CHR", "SNP", "GENPOS", "POS", "A1", "A2"],
     )
     bim["OBS_CT"] = num_samples
     bim["ALT_FREQS"] = afreq
@@ -165,6 +165,45 @@ def MyLogRegr(X, Y, W, offset):
         beta[pheno] = numerators / denominator
     return beta, chisq, afreq
 
+@numba.jit(nopython=True, parallel=True)
+def MyWightedLinRegr(X, Y, C, offset, W):
+    ## Preprocess genotype first
+    afreq = np.zeros(X.shape[1])
+    for snp in numba.prange(X.shape[1]):
+        isnan_at_snp = np.isnan(X[:, snp])
+        freq = np.nansum(X[:, snp]) / np.sum(~isnan_at_snp)
+        X[:, snp][isnan_at_snp] = 0
+        X[:, snp][~isnan_at_snp] -= freq
+        afreq[snp] = freq / 2
+    N, M = X.shape
+    chisq = np.zeros((Y.shape[1], M))
+    K = np.linalg.inv(C.T.dot(C))
+    if offset is not None:
+        y_hat = Y - offset
+    else:
+        y_hat = Y - C.dot(K.dot(C.T.dot(Y)))
+    temp = C.T.dot(X)
+    X_hat = X - C.dot(K.dot(temp))
+    XWX_inv = 1 / np.array([X_hat[:, v].dot(W*X_hat[:, v]) for v in range(M)])
+    XWY = (X.T*W).dot(y_hat)
+    beta = XWX_inv*XWY.T
+
+    # y_hat = y_hat.T    
+    # var_beta = np.zeros((y_hat.shape[0], M))
+    # for v in numba.prange(M):
+    #     var_beta[:, v] = (X_hat[:, v] * W**2 * (y_hat - np.outer(beta[:, v],X_hat[:, v]))**2).dot(X_hat[:, v])
+    # var_beta = XWX_inv**2 * var_beta
+    # chisq = beta ** 2 / var_beta
+
+    X_hat = X_hat.T
+    X_hat_square_W_square = (W**2) * (X_hat ** 2)
+    for pheno in numba.prange(y_hat.shape[1]):
+        var_beta = np.array([np.sum(X_hat_square_W_square[v] * (y_hat[:, pheno] - beta[pheno, v]*X_hat[v])**2)  for v in range(M)])
+        # var_beta = np.array([(X_hat[:, v] * W**2 * (y_hat[:, pheno] - beta[pheno, v]*X_hat[:, v])**2).dot(X_hat[:, v]) for v in range(M)])
+        var_beta = XWX_inv**2 * var_beta
+        chisq[pheno] = beta[pheno]**2/var_beta
+    return beta, chisq, afreq
+
 def firth_parallel(
     chisq_snp, beta_snp, freq_snp, geno_snp, Y, pred_covars, covars, firth_pval_thresh
 ):
@@ -206,6 +245,7 @@ def get_unadjusted_test_statistics(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
+    weights=None
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -251,6 +291,8 @@ def get_unadjusted_test_statistics(
             offset = None
 
         Y = pheno[pheno.columns[2:]].values.astype("float32")
+        if weights is not None:
+            weights_arr = weights[weights.columns[2]].values.astype("float32")
         # if not binary:
         #     Y -= np.mean(Y, axis=0)
         #     offset -= np.mean(offset, axis=0)
@@ -269,7 +311,10 @@ def get_unadjusted_test_statistics(
             if binary:
                 beta, chisq, afreq = MyLogRegr(X, Y, covars, expit(offset))
             else:
-                beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
+                if weights is None:
+                    beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
+                else:
+                    beta, chisq, afreq = MyWightedLinRegr(X, Y, covars, offset, weights_arr)
 
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
@@ -330,6 +375,7 @@ def get_unadjusted_test_statistics_bgen(
     firth=False,
     firth_pval_thresh=0.05,
     firth_null=None,
+    weights=None
 ):
     if num_threads >= 1:
         numba.set_num_threads(num_threads)
@@ -418,6 +464,8 @@ def get_unadjusted_test_statistics_bgen(
             offset = None
 
         Y = pheno[pheno.columns[2:]].values.astype("float32")
+        if weights is not None:
+            weights_arr = weights[weights.columns[2]].values.astype("float32")
         # if not binary:
         #     Y -= np.mean(Y, axis=0)
         #     offset -= np.mean(offset, axis=0)
@@ -437,7 +485,10 @@ def get_unadjusted_test_statistics_bgen(
             if binary:
                 beta, chisq, afreq = MyLogRegr(X, Y, covars, expit(offset))
             else:
-                beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
+                if weights is None:
+                    beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
+                else:
+                    beta, chisq, afreq = MyWightedLinRegr(X, Y, covars, offset, weights_arr)
 
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)

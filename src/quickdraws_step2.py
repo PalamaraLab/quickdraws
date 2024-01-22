@@ -35,7 +35,7 @@ import pdb
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
 
-def preprocess_offsets(offsets, sample_file, is_loco_file=False):
+def preprocess_offsets(offsets, sample_file=None, weights=None, is_loco_file=False):
     if is_loco_file:
         df_concat = offsets
     else:
@@ -47,6 +47,18 @@ def preprocess_offsets(offsets, sample_file, is_loco_file=False):
         sample_file[["FID", "IID"]] = sample_file[["FID", "IID"]].astype("int")
         df_concat = pd.merge(df_concat, sample_file, on=["FID", "IID"])
         df_concat = df_concat[pheno_columns]
+    if weights is not None:
+        weights_file = pd.read_csv(weights, sep="\s+")
+        weights_file = weights_file.rename(columns={"ID_1": "FID", "ID_2": "IID"})
+        weights_file[["FID", "IID"]] = weights_file[["FID", "IID"]].astype("int")
+        df_concat = pd.merge(df_concat, weights_file, on=["FID", "IID"])
+        df_concat = df_concat[pheno_columns]
+    
+    if is_loco_file:
+        logging.info("Processing loco files, Shape: " + str(df_concat.shape))
+    else:
+        logging.info("Processing " + str(offsets) + " Shape: " + str(df_concat.shape))
+
     return df_concat
 
 def adjust_test_stats(out, pheno, correction):
@@ -196,17 +208,29 @@ def get_test_statistics(
     firth=False,
     firth_pval_thresh=0.05,
     n_workers=-1,
+    weights=None
 ):
     if n_workers == -1:
         n_workers = len(os.sched_getaffinity(0))
 
+    if weights is not None and binary:
+        logging.exception("Weighted linear regression only supported for quantitive traits..")
+
     snp_on_disk = Bed(bedfile, count_A1=True)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
-    
-    traits = pd.read_csv(phenofile, sep="\s+")
-    covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
+
+    traits = preprocess_offsets(phenofile, weights)
     pheno_columns = traits.columns.tolist()
-    offset_list = load_offsets(offset, pheno_columns, unique_chrs, covar_effects)
+    covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
+    offset_list_pre = load_offsets(offset, pheno_columns, unique_chrs, covar_effects) 
+    covar_effects = preprocess_offsets(covareffectsfile, weights)
+    offset_list = Parallel(n_jobs=n_workers)(
+        delayed(preprocess_offsets)(offset_list_pre[chr_no], weights, None, True)
+        for chr_no in range(len(unique_chrs))
+    )
+    if weights is not None:
+        weights_df = pd.read_csv(weights, '\t')
+        weights = pd.merge(traits[['FID','IID']], weights_df, on=['FID','IID'])
 
     if binary:
         pheno_columns = check_case_control_sep(traits, covar, offset_list, unique_chrs)
@@ -219,6 +243,11 @@ def get_test_statistics(
         logging.info("Preprocessing traits for unrelated homogenous samples...")
         unrel_sample_traits, unrel_sample_covareffect, unrel_sample_indices = preprocess_phenotypes(phenofile, covar, bedfile, unrel_homo_file, binary, log=False)
         unrel_sample_indices = unrel_sample_indices.tolist()
+
+        if weights is not None:
+            unrel_sample_traits = pd.merge(unrel_sample_traits, weights[['FID','IID']], on=['FID','IID'])
+            unrel_sample_covareffect = pd.merge(unrel_sample_covareffect, weights[['FID','IID']], on=['FID','IID'])
+            weights = pd.merge(unrel_sample_traits[['FID','IID']], weights, on=['FID','IID'])
 
         logging.info("Running linear/logistic regression on unrelated individuals...")
         get_unadjusted_test_statistics(
@@ -233,6 +262,7 @@ def get_test_statistics(
             binary=binary, 
             firth=False,
             firth_pval_thresh=firth_pval_thresh,
+            weights=weights
         )
 
     logging.info("Running linear/logistic regression...")
@@ -248,6 +278,7 @@ def get_test_statistics(
         binary=binary,
         firth=firth,
         firth_pval_thresh=firth_pval_thresh,
+        weights=weights
     )
     if binary and firth:
         logging.info("Firth logistic regression null model estimates saved as: " + str(out) + "{chr}.firth_null")
@@ -297,31 +328,40 @@ def get_test_statistics_bgen(
     firth=False,
     firth_pval_thresh=0.05,
     n_workers=-1,
+    weights=None
 ):
     if n_workers == -1:
         n_workers = len(os.sched_getaffinity(0))
 
+    if weights is not None and binary:
+        logging.exception("Weighted linear regression only supported for quantitive traits..")
+
     snp_on_disk = Bgen(bgenfile, sample=samplefile)
     unique_chrs = np.unique(np.array(snp_on_disk.pos[:, 0], dtype=int))
-    traits = preprocess_offsets(phenofile, samplefile)
+    traits = preprocess_offsets(phenofile, samplefile, weights)
     pheno_columns = traits.columns.tolist()
 
     covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
     offset_list_pre = load_offsets(offset, pheno_columns, unique_chrs, covar_effects) 
-    covar_effects = preprocess_offsets(covareffectsfile, samplefile)
+    covar_effects = preprocess_offsets(covareffectsfile, samplefile, weights)
 
     offset_list = Parallel(n_jobs=n_workers)(
-        delayed(preprocess_offsets)(offset_list_pre[chr_no], samplefile, True)
+        delayed(preprocess_offsets)(offset_list_pre[chr_no], samplefile, weights, True)
         for chr_no in range(len(unique_chrs))
     )
     if firth and binary:
         firth_null_list = Parallel(n_jobs=n_workers)(
-            delayed(preprocess_offsets)(firthnullfile + str(C) + ".firth_null", samplefile)
+            delayed(preprocess_offsets)(firthnullfile + str(C) + ".firth_null", samplefile, weights)
             for C in unique_chrs
         )
     else:
         firth_null_list = []
-    
+
+    if weights is not None:
+        weights_df = pd.read_csv(weights, '\t')
+        mdf_weights_traits = pd.merge(traits, weights_df, on=['FID','IID'])
+        weights = np.array(mdf_weights_traits[weights_df.columns[2]].values, dtype='float32')
+
     if binary:
         pheno_columns = check_case_control_sep(traits, covar, offset_list, unique_chrs)
         traits = traits[pheno_columns]
@@ -431,6 +471,18 @@ if __name__ == "__main__":
         type=float,
         default=0.05,
     )
+    parser.add_argument(
+        "--num_threads",
+        help="Number of threads to run this code",
+        type=int,
+        default=-1
+    )
+    parser.add_argument(
+        "--sample_weights",
+        help="Sampling weights as (FID, IID, weights) to perform a weighted linear regression",
+        type=str,
+        default=None
+    )
 
     args = parser.parse_args()
 
@@ -447,7 +499,7 @@ if __name__ == "__main__":
     logging.info("Copyright (c) 2024 Hrushikesh Loya and Pier Palamara.")
     logging.info("Distributed under the GPLv3 License.")
     logging.info("")
-    logging.info("Logs saved in: " + str(args.out + ".step2.log"))
+    logging.info("Logs saved in: " + str(args.out + ".log"))
     logging.info("")
 
     logging.info("Options in effect: ")
@@ -486,6 +538,8 @@ if __name__ == "__main__":
             args.binary,
             args.firth,
             args.firth_pval_thresh,
+            args.num_threads,
+            args.sample_weights
         )
     else:
         get_test_statistics_bgen(
@@ -502,6 +556,8 @@ if __name__ == "__main__":
             args.binary,
             args.firth,
             args.firth_pval_thresh,
+            args.num_threads,
+            args.sample_weights
         )
     logging.info("#### Step 2. Done in: " + str(time.time() - st) + " secs ####")
     logging.info("")
