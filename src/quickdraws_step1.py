@@ -21,7 +21,8 @@ overall_st = time.time()
 ######      Setting the random seeds         ######
 np.random.seed(2)
 torch.manual_seed(2)
-torch.cuda.manual_seed_all(2)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(2)
 
 ######      Parsing the input arguments       ######
 parser = argparse.ArgumentParser()
@@ -74,6 +75,7 @@ parser.add_argument(
     help="path to RHE-MC / SCORE binary file",
 )
 parser.add_argument("--out_step0", help="prefix of the output files from step 0", type=str) ## depreciate
+parser.add_argument("--hdf5", help="master hdf5 file which stores genotype matrix in binary format", type=str)
 parser.add_argument("--h2_file", type=str, help="File containing estimated h2")
 parser.add_argument(
     "--h2_grid",
@@ -245,6 +247,7 @@ else:
         sample_indices,
         args.out,
         args.modelSnps,
+        args.hdf5
     )
     logging.info("#### Step 1a. Done in " + str(time.time() - st) + " secs ####")
     logging.info("")
@@ -296,7 +299,15 @@ else:
 ######      Running variational inference     ######
 st = time.time()
 logging.info("#### Step 1c. Running VI using spike and slab prior ####")
-beta = blr_spike_slab(args, VC, hdf5_filename)
+if torch.cuda.is_available():
+    logging.info("Using GPU to run variational inference!!")
+    logging.info("")
+    device = 'cuda'
+else:
+    logging.info("Didn't find any GPU, using CPU to run variational inference... expect very slow multiplications")
+    logging.info("")
+    device = 'cpu'
+beta = blr_spike_slab(args, VC, hdf5_filename, device)
 logging.info("#### Step 1c. Done in " + str(time.time() - st) + " secs ####")
 logging.info("")
 

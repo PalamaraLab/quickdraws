@@ -8,18 +8,32 @@ from tqdm import tqdm
 import argparse
 from pysnptools.distreader import Bgen
 import pdb
+import numba
+import os
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import logging
 logger = logging.getLogger(__name__)
 
+@numba.jit(nopython=True)
+def get_xtx(x, covars, K):
+    temp = covars.T.dot(x)
+    geno_covar_effect = K @ temp
+    xtx = np.array(
+        [
+            x[:, v].dot(x[:, v]) - temp[:, v].dot(K.dot(temp[:, v]))
+            for v in range(x.shape[1])
+        ]
+    )
+    return geno_covar_effect, xtx
+
 ## get covariate effect on genotypes and std_genotype
-def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096):
+def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096, num_threads=1):
     snp_on_disk = Bed(bed, count_A1=True)
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
     chunk_size = min(chunk_size, snp_on_disk.shape[1])
     if covars is None:
-        covars = np.ones((len(sample_indices), 1))
+        covars = np.ones((len(sample_indices), 1), dtype='float32')
     else:
         df_covar = pd.read_csv(covars, sep="\s+")
         df_covar = pd.merge(
@@ -30,7 +44,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
         df_covar = df_covar.loc[:, df_covar.std() > 0]
         df_covar["ALL_CONST"] = 1
         df_covar = df_covar.fillna(df_covar.median())
-        covars = df_covar[df_covar.columns[2:]].values
+        covars = df_covar[df_covar.columns[2:]].values.astype("float32")
     
     K = np.linalg.inv(covars.T @ covars)
 
@@ -39,7 +53,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
     for i in tqdm(range(0, snp_on_disk.shape[1], chunk_size)):
         x = 2 - (
             snp_on_disk[:, i : min(i + chunk_size, snp_on_disk.shape[1])]
-            .read(dtype="int8", _require_float32_64=False)
+            .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
             .val
         )
         x = np.array(x, dtype="float32")
@@ -49,19 +63,22 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
             np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
             x,
         )
+        pdb.set_trace()
         temp = covars.T.dot(x)
-        geno_covar_effect[:, i : min(i + chunk_size, snp_on_disk.shape[1])] = K @ temp
-        xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] = np.array(
+        geno_covar_effect_numba = K @ temp
+        xtx_numba = np.array(
             [
-                x[:, v].dot(x[:, v]) - temp[:, v].dot(K.dot(temp[:, v])) #### CAUTION!!!
+                x[:, v].dot(x[:, v]) - temp[:, v].dot(K.dot(temp[:, v]))
                 for v in range(x.shape[1])
             ]
         )
+        # geno_covar_effect_numba, xtx_numba = get_xtx(x, covars, K)
+        xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] = xtx_numba
+        geno_covar_effect[:, i : min(i + chunk_size, snp_on_disk.shape[1])] = geno_covar_effect_numba
         if (xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] < 0).any():
             logging.exception("Check if covariates are independent, the covariate linear regression might be unstable...")
             raise ValueError
     return covars, geno_covar_effect, np.sqrt(xtx / len(sample_indices))
-
 
 def convert_to_hdf5(
     bed,
@@ -69,18 +86,16 @@ def convert_to_hdf5(
     sample_indices,
     out="out",
     snps_to_keep_filename=None,
+    master_hdf5=None,
     chunk_size=4096,
-    train_split = 0.8,
-    binary=False
 ):
+    num_threads = len(os.sched_getaffinity(0))
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
 
     ## handle phenotypes here
     pheno = pd.read_csv(out + ".traits", sep="\s+")
     covareffect = pd.read_csv(out + ".covar_effects", sep="\s+")
     snp_on_disk = Bed(bed, count_A1=True)
-
-    chunk_size = min(chunk_size, snp_on_disk.shape[0])
 
     ##Count total SNPs
     if snps_to_keep_filename is None:
@@ -97,14 +112,39 @@ def convert_to_hdf5(
         for snp in snps_to_keep:
             snp_mask[snp_dict[snp]] = True
 
-    logging.info("Estimating variance per allele...")
-    covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
-        bed, sample_indices, covars, snp_mask, chunk_size=4096
-    )
-    # save the chromosome information
-    _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
+    if master_hdf5 is not None:
+        master_hdf5 = h5py.File(master_hdf5, 'r')
+        bed_fid_iid = pd.DataFrame(snp_on_disk.iid[sample_indices], columns=['FID','IID'])
+        hdf5_fid_iid = pd.DataFrame(master_hdf5['iid'][:].astype(str), columns=['FID','IID'])
+        hdf5_fid_iid['index'] = hdf5_fid_iid.index
+        mdf = pd.merge(bed_fid_iid, hdf5_fid_iid, on=['FID','IID'])
 
+        sample_order = mdf['index'].values ### caution ###
+        ### caution ###
+        # if len(mdf) == len(bed_fid_iid):
+        #     if (master_hdf5['sid'][:].astype(str) == snp_on_disk[:, snp_mask].sid).all():
+        #         sample_order = mdf['index'].values
+        #         logging.info("Found all SNPs from bed file in prespecified HDF5 file, using HDF5 file")
+        #     else:
+        #         logging.info("Didn't Find all SNPs from bed file in prespecified HDF5 file, using Bed file")
+        #         master_hdf5.close()
+        #         master_hdf5 = None
+        # else:
+        #     logging.info("Didn't Find all samples from bed file in prespecified HDF5 file, using Bed file")
+        #     master_hdf5.close()
+        #     master_hdf5 = None
+        
+
+    chunk_size = min(chunk_size, snp_on_disk.shape[0])
+
+    logging.info("Estimating variance per allele...")
+
+    covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
+        bed, sample_indices, covars, snp_mask, chunk_size=4096, num_threads=num_threads
+    )
+    _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
     total_snps = int(sum(snp_mask))
+
     total_samples = len(sample_indices)
     logging.info("Total number of samples in HDF5 file = " + str(total_samples))
 
@@ -117,14 +157,12 @@ def convert_to_hdf5(
         "hap1",
         (total_samples, int(np.ceil(total_snps / 8))),
         chunks=(chunk_size, int(np.ceil(total_snps / 8))),
-        # compression="gzip",
         dtype=np.uint8,
     )
     dset2 = h1.create_dataset(
         "hap2",
         (total_samples, int(np.ceil(total_snps / 8))),
         chunks=(chunk_size, int(np.ceil(total_snps / 8))),
-        # compression="gzip",
         dtype=np.uint8,
     )
     _ = h1.create_dataset("pheno_names", data=pheno.columns[2:].tolist())
@@ -140,11 +178,91 @@ def convert_to_hdf5(
 
     logging.info("Saving the genotype to HDF5 file...")
     for i in tqdm(range(0, total_samples, chunk_size)):
+        if master_hdf5 is None:
+            x = 2 - (
+                snp_on_disk[
+                    sample_indices[i : min(i + chunk_size, total_samples)], snp_mask
+                ]
+                .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
+                .val
+            )
+            x = np.array(x, dtype="float32")
+            x[x < 0] = np.nan
+            x = np.where(
+                np.isnan(x),
+                np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
+                x,
+            )
+            dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
+            dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
+            ## np.packbits() requires most time (~ 80%)
+        else:
+            ## check: might have to go one after another
+            for index, pos in enumerate(np.sort(sample_order[i : min(i + chunk_size, total_samples)])):
+                dset1[i + index] = master_hdf5['hap1'][pos]
+                dset2[i + index] = master_hdf5['hap2'][pos]
+
+    h1.close()
+    logging.info("Done saving the genotypes to hdf5 file " + str(out + '.hdf5'))
+    
+    if master_hdf5 is not None:
+        master_hdf5.close()
+
+    return out + ".hdf5"
+
+
+def make_master_hdf5(
+    bed,
+    out="out",
+    snps_to_keep_filename=None,
+    chunk_size=4096,
+):
+    num_threads = len(os.sched_getaffinity(0))
+    h1 = h5py.File(out + ".hdf5", 'w') ###caution
+    snp_on_disk = Bed(bed, count_A1=True)
+
+    if snps_to_keep_filename is None:
+        total_snps = snp_on_disk.sid_count
+        snp_mask = np.ones(total_snps, dtype="bool")
+    else:
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
+        snp_dict = {}
+        total_snps = snp_on_disk.sid_count
+        snp_mask = np.zeros(total_snps, dtype="bool")
+        for snp_no, snp in enumerate(snp_on_disk.sid):
+            snp_dict[snp] = snp_no
+        for snp in snps_to_keep:
+            snp_mask[snp_dict[snp]] = True
+
+    snp_on_disk = snp_on_disk[:, snp_mask]
+    chunk_size = min(chunk_size, snp_on_disk.shape[0])
+
+    _ = h1.create_dataset("iid", data=np.array(snp_on_disk.iid, dtype='S'))
+    _ = h1.create_dataset("sid", data=np.array(snp_on_disk.sid, dtype='S'))
+
+    total_snps = int(sum(snp_mask))
+    total_samples = snp_on_disk.shape[0]
+
+    dset1 = h1.create_dataset(
+        "hap1",
+        (total_samples, int(np.ceil(total_snps / 8))),
+        chunks=(chunk_size, int(np.ceil(total_snps / 8))),
+        dtype=np.uint8,
+    )
+    dset2 = h1.create_dataset(
+        "hap2",
+        (total_samples, int(np.ceil(total_snps / 8))),
+        chunks=(chunk_size, int(np.ceil(total_snps / 8))),
+        dtype=np.uint8,
+    )
+    logging.info("Saving the genotype to HDF5 file...")
+    for i in tqdm(range(0, total_samples, chunk_size)):
         x = 2 - (
             snp_on_disk[
-                sample_indices[i : min(i + chunk_size, total_samples)], snp_mask
+                i : min(i + chunk_size, total_samples), snp_mask
             ]
-            .read(dtype="int8", _require_float32_64=False)
+            .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
             .val
         )
         x = np.array(x, dtype="float32")
@@ -156,11 +274,11 @@ def convert_to_hdf5(
         )
         dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
         dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
-        ## np.packbits() requires most time (~ 80%)
 
     h1.close()
     logging.info("Done saving the genotypes to hdf5 file " + str(out + '.hdf5'))
-    return out + ".hdf5"
+    return out + ".hdf5"    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -205,7 +323,7 @@ if __name__ == "__main__":
         const=True,
         default=False,
     )
-
+    parser.add_argument("--hdf5", help="master hdf5 file which stores genotype matrix in binary format", type=str)
     args = parser.parse_args()
 
     if args.bed is not None and args.phenoFile is not None:
@@ -215,5 +333,7 @@ if __name__ == "__main__":
         PreparePhenoRHE(Traits, covar_effects, args.bed, args.out, None)
 
         filename = convert_to_hdf5(
-            args.bed, args.covarFile, sample_indices, args.out, args.modelSnps
+            args.bed, args.covarFile, sample_indices, args.out, args.modelSnps, args.hdf5
         )
+    elif args.bed is not None:
+        make_master_hdf5(args.bed, args.out, args.modelSnps)
