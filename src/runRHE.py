@@ -30,8 +30,19 @@ def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_
     logging.info("Number of SNPs with MAF/LD information = " + str(len(df) - df['MAF'].isna().sum()))
     is_missing = int(df['MAF'].isna().any())
 
-    mafs = df.MAF.values
-    ld_scores = df.LDSCORE.values
+    if 'MAF' in df.columns:
+        mafs = df.MAF.values
+    elif 'maf' in df.columns:
+        mafs = df.maf.values 
+    else:
+        logging.exception("Didn't find a MAF/maf column in ldscores files")
+
+    if 'LDSCORE' in df.columns:
+        ld_scores = df.LDSCORE.values
+    elif 'ldscore' in df.columns:
+        ld_scores = df.ldscore.values
+    else:
+        logging.exception("Didn't find a LDSCORE/ldscore column in ldscores files")
 
     # subsetting to variants in the correct MAF bin
     n_maf_bins = len(maf_bins) - 1
