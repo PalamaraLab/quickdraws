@@ -8,6 +8,9 @@ from datetime import datetime
 from art import text2art
 import warnings
 from pathlib import Path
+import pandas as pd 
+from pysnptools.snpreader import Bed
+
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 from runRHE import runRHE, MakeAnnotation, runSCORE
@@ -206,7 +209,7 @@ logging.info(text2art("Quickdraws"))
 logging.info("Copyright (c) 2024 Hrushikesh Loya and Pier Palamara.")
 logging.info("Distributed under the GPLv3 License.")
 logging.info("")
-logging.info("Logs saved in: " + str(args.out + ".step1.log"))
+logging.info("Logs saved in: " + str(args.out + ".log"))
 logging.info("")
 
 logging.info("Options in effect: ")
@@ -293,7 +296,7 @@ else:
 ######      Running variational inference     ######
 st = time.time()
 logging.info("#### Step 1c. Running VI using spike and slab prior ####")
-blr_spike_slab(args, VC, hdf5_filename)
+beta = blr_spike_slab(args, VC, hdf5_filename)
 logging.info("#### Step 1c. Done in " + str(time.time() - st) + " secs ####")
 logging.info("")
 
@@ -313,7 +316,34 @@ logging.info("")
 logging.info("Saved sparsity estimates per phenotype as: " + str(args.out + '.alpha'))
 logging.info("")
 if args.predBetasFlag:
-    logging.info("Saved BLUP betas per phenotype as: " + str(args.out + '.blup'))
+    snp_on_disk = Bed(args.bed, count_A1=True)
+    if args.modelSnps is None:
+        total_snps = snp_on_disk.sid_count
+        snp_mask = np.ones(total_snps, dtype="bool")
+    else:
+        snps_to_keep = pd.read_csv(args.modelSnps, sep="\s+")
+        snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
+        snp_dict = {}
+        total_snps = snp_on_disk.sid_count
+        snp_mask = np.zeros(total_snps, dtype="bool")
+        for snp_no, snp in enumerate(snp_on_disk.sid):
+            snp_dict[snp] = snp_no
+        for snp in snps_to_keep:
+            snp_mask[snp_dict[snp]] = True
+
+    snp_on_disk = snp_on_disk[:, snp_mask]
+    df = pd.DataFrame(columns = ['CHR','GENPOS','POS', 'SNP','BETA'])
+    df['CHR'] = snp_on_disk.pos[:, 0]
+    df['GENPOS'] = snp_on_disk.pos[:, 1]
+    df['POS'] = snp_on_disk.pos[:, 2]
+    df['SNP'] = snp_on_disk.sid
+    for d in range(beta.shape[0]): 
+        df['BETA'] = beta[d]
+        df.to_csv(args.out + '_' + str(d+1) + '.blup', sep='\t', index=None, na_rep='NA')
+
+    logging.info("Saved BLUP betas per phenotype as: ")
+    for i, pheno_name in enumerate(pheno_names):
+        logging.info(pheno_name.decode() + " : " + str(Path(args.out).resolve()) + "_" + str(i+1) + ".blup")
     logging.info("")
 
 logging.info("#### Step 1 total Time: " + str(time.time() - overall_st) + " secs ####")

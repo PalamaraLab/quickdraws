@@ -1036,20 +1036,20 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         logging.info("Calculating the BLUP Betas using the entire data...")
         dim_out = full_dataset.output.shape[1]
         best_alpha = np.argmax(output_r2_subset, axis=1)
-        
         mu_list = np.zeros((dim_out, len(std_genotype)))
         spike_list = np.zeros((dim_out, len(std_genotype)))
         for prs_no in range(dim_out):
+            output_no = np.where(np.where(best_alpha == best_alpha[prs_no])[0] == prs_no)[0][0]
             mu = (
                 trainer.model_list[best_alpha[prs_no]*num_chr + num_chr - 1]
-                .fc1.weight[prs_no]
+                .fc1.weight[output_no]
                 .cpu()
                 .detach()
                 .numpy()
             )
             spike = (
                 torch.clamp(
-                    trainer.model_list[best_alpha[prs_no]*num_chr + num_chr - 1].sc1.spike1[prs_no],
+                    trainer.model_list[best_alpha[prs_no]*num_chr + num_chr - 1].sc1.spike1[output_no],
                     1e-6,
                     1.0 - 1e-6,
                 )
@@ -1060,14 +1060,15 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
             mu_list[prs_no] = mu
             spike_list[prs_no] = spike
         
-        np.savetxt(args.out + ".blup", mu * spike)
-
-        ## add chr=23 in initialize models
-        ## save results for chr 23, 46, so on..
+        beta = mu_list * spike_list
+    else:
+        beta = None 
 
     wandb.finish()
     if args.lowmem:
         full_dataset.close_hdf5()
+    
+    return beta
 
 
 if __name__ == "__main__":
