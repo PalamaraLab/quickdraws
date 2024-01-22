@@ -15,8 +15,14 @@ from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import logging
 logger = logging.getLogger(__name__)
 
-@numba.jit(nopython=True)
+@numba.jit(nopython=True, parallel=True)
 def get_xtx(x, covars, K):
+    for snp in numba.prange(x.shape[1]):
+        isnan_at_snp = np.isnan(x[:, snp])
+        freq = np.nansum(x[:, snp]) / np.sum(~isnan_at_snp)
+        x[:, snp][isnan_at_snp] = 0
+        x[:, snp][~isnan_at_snp] -= freq
+
     temp = covars.T.dot(x)
     geno_covar_effect = K @ temp
     xtx = np.array(
@@ -44,7 +50,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
         df_covar = df_covar.loc[:, df_covar.std() > 0]
         df_covar["ALL_CONST"] = 1
         df_covar = df_covar.fillna(df_covar.median())
-        covars = df_covar[df_covar.columns[2:]].values.astype("float32")
+        covars = df_covar[df_covar.columns[2:]].values
     
     K = np.linalg.inv(covars.T @ covars)
 
@@ -53,29 +59,13 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
     for i in tqdm(range(0, snp_on_disk.shape[1], chunk_size)):
         x = 2 - (
             snp_on_disk[:, i : min(i + chunk_size, snp_on_disk.shape[1])]
-            .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
+            .read(dtype="float64", num_threads=num_threads)
             .val
         )
-        x = np.array(x, dtype="float32")
-        x[x < 0] = np.nan
-        x = np.where(
-            np.isnan(x),
-            np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
-            x,
-        )
-        pdb.set_trace()
-        temp = covars.T.dot(x)
-        geno_covar_effect_numba = K @ temp
-        xtx_numba = np.array(
-            [
-                x[:, v].dot(x[:, v]) - temp[:, v].dot(K.dot(temp[:, v]))
-                for v in range(x.shape[1])
-            ]
-        )
-        # geno_covar_effect_numba, xtx_numba = get_xtx(x, covars, K)
+        geno_covar_effect_numba, xtx_numba = get_xtx(x, covars, K)
         xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] = xtx_numba
         geno_covar_effect[:, i : min(i + chunk_size, snp_on_disk.shape[1])] = geno_covar_effect_numba
-        if (xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] < 0).any():
+        if (xtx_numba < 0).any():
             logging.exception("Check if covariates are independent, the covariate linear regression might be unstable...")
             raise ValueError
     return covars, geno_covar_effect, np.sqrt(xtx / len(sample_indices))
@@ -118,21 +108,18 @@ def convert_to_hdf5(
         hdf5_fid_iid = pd.DataFrame(master_hdf5['iid'][:].astype(str), columns=['FID','IID'])
         hdf5_fid_iid['index'] = hdf5_fid_iid.index
         mdf = pd.merge(bed_fid_iid, hdf5_fid_iid, on=['FID','IID'])
-
-        sample_order = mdf['index'].values ### caution ###
-        ### caution ###
-        # if len(mdf) == len(bed_fid_iid):
-        #     if (master_hdf5['sid'][:].astype(str) == snp_on_disk[:, snp_mask].sid).all():
-        #         sample_order = mdf['index'].values
-        #         logging.info("Found all SNPs from bed file in prespecified HDF5 file, using HDF5 file")
-        #     else:
-        #         logging.info("Didn't Find all SNPs from bed file in prespecified HDF5 file, using Bed file")
-        #         master_hdf5.close()
-        #         master_hdf5 = None
-        # else:
-        #     logging.info("Didn't Find all samples from bed file in prespecified HDF5 file, using Bed file")
-        #     master_hdf5.close()
-        #     master_hdf5 = None
+        if len(mdf) == len(bed_fid_iid):
+            if (master_hdf5['sid'][:].astype(str) == snp_on_disk[:, snp_mask].sid).all():
+                sample_order = mdf['index'].values
+                logging.info("Found all SNPs from bed file in prespecified HDF5 file, using HDF5 file")
+            else:
+                logging.info("Didn't Find all SNPs from bed file in prespecified HDF5 file, using Bed file")
+                master_hdf5.close()
+                master_hdf5 = None
+        else:
+            logging.info("Didn't Find all samples from bed file in prespecified HDF5 file, using Bed file")
+            master_hdf5.close()
+            master_hdf5 = None
         
 
     chunk_size = min(chunk_size, snp_on_disk.shape[0])
@@ -331,7 +318,7 @@ if __name__ == "__main__":
             args.phenoFile, args.covarFile, args.bed, args.removeFile, args.binary
         )
         PreparePhenoRHE(Traits, covar_effects, args.bed, args.out, None)
-
+        # np.arange(405088)
         filename = convert_to_hdf5(
             args.bed, args.covarFile, sample_indices, args.out, args.modelSnps, args.hdf5
         )
