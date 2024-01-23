@@ -17,4 +17,4 @@ bash run_example.sh
 ```
 
 ## Citation ##
-TODO
+Loya et al., "A scalable variational inference approach for increased mixed-model association power" under review
