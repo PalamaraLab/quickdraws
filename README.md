@@ -129,15 +129,15 @@ We generate many output files, a list of all the files generated through the ana
 
 | Filename            | Step  |   Description   |
 |:--------------------:|:---------:|:-------------------------------------------|
-| {out}.traits         | Step 1    | Stores the postprocessed traits used through the analysis |
-| {out}.covar_effects         | Step 1    | Stores the covariate effects on phenotypes |
-| {out}.hdf5         | Step 1    | HDF5 file which stores the genotype matrix for quick access |
-| {out}.h2         | Step 1    | Heritability per phenotype |
-| {out}.alpha         | Step 1    | Optimal sparsity parameter fit per phenotype |
-| {out}.{pheno}.blup         | Step 1    | BLUP betas for phenotype ${pheno} |
-| {out}.{pheno}.sumstats.gz         | Step 2    | QD summary statistics for phenotype ${pheno} (gzip-compressed) |
-| {out}.{pheno}_lrunrel.sumstats    | Step 2    | linear regression on unrelated samples for phenotype ${pheno} (HDF accessible) |
-| {out}.calibration         | Step 2    | Calibration factor caclulated through LDSC attn. ratio |
+| {out}.traits         | 1    | Stores the postprocessed traits used through the analysis |
+| {out}.covar_effects         | 1    | Stores the covariate effects on phenotypes |
+| {out}.hdf5         |  1    | HDF5 file which stores the genotype matrix for quick access |
+| {out}.h2         |  1    | Heritability per phenotype |
+| {out}.alpha         |  1    | Optimal sparsity parameter fit per phenotype |
+| {out}.{pheno}.blup         | 1    | BLUP betas for phenotype ${pheno} |
+| {out}.{pheno}.sumstats.gz         |  2    | QD summary statistics for phenotype ${pheno} (gzip-compressed) |
+| {out}.{pheno}_lrunrel.sumstats    |  2    | linear regression on unrelated samples for phenotype ${pheno} (HDF accessible) |
+| {out}.calibration         |  2    | Calibration factor caclulated through LDSC attn. ratio |
 
 
 ## FAQs
