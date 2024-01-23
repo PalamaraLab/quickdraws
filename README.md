@@ -16,5 +16,8 @@ mkdir output
 bash run_example.sh
 ```
 
+## Contact information ##
+For any technical issues please contact Hrushikesh Loya (loya@stats.ox.ac.uk)
+
 ## Citation ##
 Loya et al., "A scalable variational inference approach for increased mixed-model association power" under review
