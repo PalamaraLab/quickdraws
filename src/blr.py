@@ -27,6 +27,9 @@ import pdb
 import logging
 logger = logging.getLogger(__name__)
 
+if torch.cuda.is_available():
+    import bitsandbytes as bnb
+
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
 
@@ -82,7 +85,7 @@ class BBB_Linear_spike_slab(nn.Module):
         if test:
             spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
             return spike.mul(mu1)
-        if device == 'cuda':
+        if device.type == 'cuda':
             eps = torch.cuda.FloatTensor(mu1.shape)
         else:
             eps = torch.FloatTensor(mu1.shape)
@@ -93,7 +96,7 @@ class BBB_Linear_spike_slab(nn.Module):
 
         spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
         log_spike = torch.log(spike / (1 - spike))
-        if device == 'cuda':
+        if device.type == 'cuda':
             unif = torch.cuda.FloatTensor(spike.shape)
         else:
             unif = torch.FloatTensor(spike.shape)
@@ -124,7 +127,7 @@ class BBB_Linear_spike_slab(nn.Module):
         var_preactivations = (
             spike.mul(sig1.pow(2)) + spike.mul(mu1.pow(2)) - mean_preactivations.pow(2)
         )
-        if device == 'cuda':
+        if device.type == 'cuda':
             eps = torch.cuda.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
         else:
             eps = torch.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
@@ -869,9 +872,6 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
 
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
-    if device == 'cuda':
-        import bitsandbytes as bnb
-
     overall_start_time = time.time()
     if not args.wandb_mode == "disabled":
         logging.info("Initializing wandb to log the progress..")

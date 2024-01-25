@@ -19,9 +19,8 @@ logger = logging.getLogger(__name__)
 def get_xtx(x, covars, K):
     for snp in numba.prange(x.shape[1]):
         isnan_at_snp = np.isnan(x[:, snp])
-        freq = np.nansum(x[:, snp]) / np.sum(~isnan_at_snp)
-        x[:, snp][isnan_at_snp] = 0
-        x[:, snp][~isnan_at_snp] -= freq
+        freq = np.median(x[:, snp][~isnan_at_snp])
+        x[:, snp][isnan_at_snp] = freq
 
     temp = covars.T.dot(x)
     geno_covar_effect = K @ temp
@@ -184,8 +183,8 @@ def convert_to_hdf5(
             dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
             ## np.packbits() requires most time (~ 80%)
         else:
-            ## check: might have to go one after another
-            for index, pos in enumerate(np.sort(sample_order[i : min(i + chunk_size, total_samples)])):
+            for index in np.argsort(sample_order[i : min(i + chunk_size, total_samples)]):
+                pos = sample_order[i : min(i + chunk_size, total_samples)][index]
                 dset1[i + index] = master_hdf5['hap1'][pos]
                 dset2[i + index] = master_hdf5['hap2'][pos]
 
@@ -292,14 +291,14 @@ if __name__ == "__main__":
         type=str,
     )
     parser.add_argument(
-        "--removeFile",
+        "--keepFile",
         "-r",
-        help='file with sample id to remove; should be in "FID,IID" format and tsv',
+        help='file with sample id to keep; should be in "FID,IID" format and tsv',
         type=str,
     )
     parser.add_argument(
         "--modelSnps",
-        help="Path to list of SNPs to be considered in BLR",
+        help="Path to list of SNPs to be considered in model fitting",
         default=None,
         type=str,
     )
@@ -315,7 +314,7 @@ if __name__ == "__main__":
 
     if args.bed is not None and args.phenoFile is not None:
         Traits, covar_effects, sample_indices = preprocess_phenotypes(
-            args.phenoFile, args.covarFile, args.bed, args.removeFile, args.binary
+            args.phenoFile, args.covarFile, args.bed, args.keepFile, args.binary
         )
         PreparePhenoRHE(Traits, covar_effects, args.bed, args.out, None)
         # np.arange(405088)

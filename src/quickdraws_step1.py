@@ -58,13 +58,13 @@ parser.add_argument(
 )
 parser.add_argument(
     "--ldscores",
-    help="Path to ld score directory in format accepted by ldsc",
+    help="Path to ldscores file (should have MAF and LDSCORE columns and tab-seperated)",
     type=str,
     default=None
 )
 parser.add_argument(
     "--modelSnps",
-    help="Path to list of SNPs to be considered in BLR",
+    help="Path to list of SNPs to be considered in model fitting",
     default=None,
     type=str,
 )
@@ -72,7 +72,7 @@ parser.add_argument(
     "--rhemc",
     type=str,
     default="src/RHEmcmt",
-    help="path to RHE-MC / SCORE binary file",
+    help="path to RHE-MCMT binary file",
 )
 parser.add_argument("--out_step0", help="prefix of the output files from step 0", type=str) ## depreciate
 parser.add_argument("--hdf5", help="master hdf5 file which stores genotype matrix in binary format", type=str)

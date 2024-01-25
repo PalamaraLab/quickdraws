@@ -207,6 +207,8 @@ def get_test_statistics(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
+    firth_maf_thresh=0.05,
+    firth_prevalence_thresh=0.05,
     n_workers=-1,
     weights=None
 ):
@@ -261,7 +263,6 @@ def get_test_statistics(
             num_threads=n_workers,
             binary=binary, 
             firth=False,
-            firth_pval_thresh=firth_pval_thresh,
             weights=weights
         )
 
@@ -278,6 +279,8 @@ def get_test_statistics(
         binary=binary,
         firth=firth,
         firth_pval_thresh=firth_pval_thresh,
+        firth_maf_thresh=firth_maf_thresh,
+        firth_prevalence_thresh=firth_prevalence_thresh,
         weights=weights
     )
     if binary and firth:
@@ -327,6 +330,8 @@ def get_test_statistics_bgen(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
+    firth_maf_thresh=0.05,
+    firth_prevalence_thresh=0.05,
     n_workers=-1,
     weights=None
 ):
@@ -393,6 +398,8 @@ def get_test_statistics_bgen(
         binary=binary,
         firth=firth,
         firth_pval_thresh=firth_pval_thresh,
+        firth_maf_thresh=firth_maf_thresh,
+        firth_prevalence_thresh=firth_prevalence_thresh,
         firth_null=firth_null_list,
     )
 
@@ -434,7 +441,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--ldscores",
-        help="Path to ld score directory in format accepted by ldsc",
+        help="	Path to ldscores file (should have MAF and LDSCORE columns and tab-seperated)",
         type=str,
     )
     parser.add_argument(
@@ -468,6 +475,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--firth_pval_thresh",
         help="P-value threshold below which firth logistic regression done",
+        type=float,
+        default=0.05,
+    )
+    parser.add_argument(
+        "--firth_maf_thresh",
+        help="MAF threshold below which firth logistic regression done",
+        type=float,
+        default=0.05,
+    )
+    parser.add_argument(
+        "--firth_prevalence_thresh",
+        help="Prevalence threshold below which firth logistic regression done",
         type=float,
         default=0.05,
     )
@@ -538,6 +557,8 @@ if __name__ == "__main__":
             args.binary,
             args.firth,
             args.firth_pval_thresh,
+            args.firth_maf_thresh,
+            args.firth_prevalence_thresh,
             args.num_threads,
             args.sample_weights
         )
@@ -556,6 +577,8 @@ if __name__ == "__main__":
             args.binary,
             args.firth,
             args.firth_pval_thresh,
+            args.firth_maf_thresh,
+            args.firth_prevalence_thresh,
             args.num_threads,
             args.sample_weights
         )

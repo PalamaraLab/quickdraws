@@ -205,12 +205,12 @@ def MyWightedLinRegr(X, Y, C, offset, W):
     return beta, chisq, afreq
 
 def firth_parallel(
-    chisq_snp, beta_snp, freq_snp, geno_snp, Y, pred_covars, covars, firth_pval_thresh
+    chisq_snp, beta_snp, freq_snp, geno_snp, Y, pred_covars, covars, firth_pval_thresh, firth_maf_thresh, firth_prevalence_thresh
 ):
     chisq_out = chisq_snp.copy()
     beta_out = beta_snp.copy()
-    is_rare_snp = (freq_snp < 5e-2) | (freq_snp > (1 - 5e-2)) ##caution
-    is_rare_pheno = ((np.nanmean(Y, axis=0) < 5e-2) | (np.nanmean(Y, axis=0) > (1 - 5e-2)))
+    is_rare_snp = (freq_snp < firth_maf_thresh) | (freq_snp > (1 - firth_maf_thresh)) ##caution
+    is_rare_pheno = ((np.nanmean(Y, axis=0) < firth_prevalence_thresh) | (np.nanmean(Y, axis=0) > (1 - firth_prevalence_thresh)))
     pheno_mask = ((chi2.sf(chisq_snp, df=1) < firth_pval_thresh) & (is_rare_pheno | is_rare_snp))
     beta_firth, se, loglike_diff, iters = firth_logit_svt(
         geno_snp, Y[:, pheno_mask], pred_covars[:, pheno_mask], covars
@@ -245,6 +245,8 @@ def get_unadjusted_test_statistics(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
+    firth_maf_thresh=0.05,
+    firth_prevalence_thresh=0.05,
     weights=None
 ):
     if num_threads >= 1:
@@ -336,6 +338,8 @@ def get_unadjusted_test_statistics(
                         pred_covars_arr[chr_no],
                         covars,
                         firth_pval_thresh,
+                        firth_maf_thresh,
+                        firth_prevalence_thresh
                     )
                     for snp in range(0, chisq.shape[1])
                 )
@@ -374,6 +378,8 @@ def get_unadjusted_test_statistics_bgen(
     binary=False,
     firth=False,
     firth_pval_thresh=0.05,
+    firth_maf_thresh=0.05,
+    firth_prevalence_thresh=0.05,
     firth_null=None,
     weights=None
 ):
@@ -510,6 +516,8 @@ def get_unadjusted_test_statistics_bgen(
                         pred_covars_arr[chr_no],
                         covars,
                         firth_pval_thresh,
+                        firth_maf_thresh,
+                        firth_prevalence_thresh
                     )
                     for snp in range(0, chisq.shape[1])
                 )
