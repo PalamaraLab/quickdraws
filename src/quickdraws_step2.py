@@ -22,6 +22,7 @@ import warnings
 import logging
 from datetime import datetime
 from art import text2art
+import copy
 
 from ldscore_calibration import calc_ldscore_chip, ldscore_intercept, get_mask_dodgy
 from custom_linear_regression import (
@@ -224,7 +225,16 @@ def get_test_statistics(
     traits = preprocess_offsets(phenofile, weights)
     pheno_columns = traits.columns.tolist()
     covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
-    offset_list_pre = load_offsets(offset, pheno_columns, unique_chrs, covar_effects) 
+    
+    if weights is None:
+        offset_list_pre = load_offsets(offset, pheno_columns, unique_chrs, covar_effects)
+    else:
+        ### Dont substract covariate effect with weighted linear regression,
+        ### It is instead done in MyWightedLinRegr function
+        covar_effects_copy = copy.deepcopy(covar_effects)
+        covar_effects_copy[covar_effects_copy.columns[2:]] = 0
+        offset_list_pre = load_offsets(offset, pheno_columns, unique_chrs, covar_effects_copy)
+    
     covar_effects = preprocess_offsets(covareffectsfile, weights)
     offset_list = Parallel(n_jobs=n_workers)(
         delayed(preprocess_offsets)(offset_list_pre[chr_no], weights, None, True)
@@ -249,7 +259,9 @@ def get_test_statistics(
         if weights is not None:
             unrel_sample_traits = pd.merge(unrel_sample_traits, weights[['FID','IID']], on=['FID','IID'])
             unrel_sample_covareffect = pd.merge(unrel_sample_covareffect, weights[['FID','IID']], on=['FID','IID'])
-            weights = pd.merge(unrel_sample_traits[['FID','IID']], weights, on=['FID','IID'])
+            weights_unrel = pd.merge(unrel_sample_traits[['FID','IID']], weights, on=['FID','IID'])
+        else:
+            weights_unrel = None
 
         logging.info("Running linear/logistic regression on unrelated individuals...")
         get_unadjusted_test_statistics(
@@ -263,7 +275,7 @@ def get_test_statistics(
             num_threads=n_workers,
             binary=binary, 
             firth=False,
-            weights=weights
+            weights=weights_unrel
         )
 
     logging.info("Running linear/logistic regression...")
@@ -536,7 +548,7 @@ if __name__ == "__main__":
     covareffects = args.out_step1 + ".covar_effects"
     firth_null_file = args.out_step1
 
-    assert (args.calibrate and args.unrel_sample_list is not None) or (not args.calibrate)
+    assert (args.calibrate and args.unrel_sample_list is not None) or (not args.calibrate) or (args.calibrationFile is not None)
     "Provide a list of unrelated homogenous sample if you wish to calibrate"
 
     ######      Calculating test statistics       ######

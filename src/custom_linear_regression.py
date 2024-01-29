@@ -177,15 +177,19 @@ def MyWightedLinRegr(X, Y, C, offset, W):
         afreq[snp] = freq / 2
     N, M = X.shape
     chisq = np.zeros((Y.shape[1], M))
-    K = np.linalg.inv(C.T.dot(C))
+
+    K = np.linalg.inv((C.T*W).dot(C))
     if offset is not None:
+        ### Assumes offset doesn't have covariate effects
         y_hat = Y - offset
+        y_hat = y_hat - C.dot(K.dot((C.T*W).dot(y_hat)))
     else:
-        y_hat = Y - C.dot(K.dot(C.T.dot(Y)))
-    temp = C.T.dot(X)
+        y_hat = Y - C.dot(K.dot((C.T*W).dot(Y)))
+
+    temp = (C.T*W).dot(X)
     X_hat = X - C.dot(K.dot(temp))
     XWX_inv = 1 / np.array([X_hat[:, v].dot(W*X_hat[:, v]) for v in range(M)])
-    XWY = (X.T*W).dot(y_hat)
+    XWY = (X_hat.T*W).dot(y_hat)
     beta = XWX_inv*XWY.T
 
     # y_hat = y_hat.T    
@@ -544,4 +548,22 @@ def get_unadjusted_test_statistics_bgen(
 
 
 if __name__ == "__main__":
-    pass
+    X = np.random.randn(1000, 100)
+    Y = np.random.randn(1000, 5)
+    # covars = np.random.randn(1000, 20)
+    covars = np.ones((1000, 1))
+    offset = None
+    weights_arr = 5*np.random.rand(1000,)
+    beta1, chisq1, afreq1 = MyLinRegr(X, Y, covars, offset)
+    beta2, chisq2, afreq2 = MyWightedLinRegr(X, Y, covars, offset, weights_arr)
+    
+
+    import statsmodels.api as sm
+    from sklearn.linear_model import LinearRegression
+
+    model = LinearRegression() # Create a linear regression model
+    model.fit(sm.add_constant(X[:,0]), Y, sample_weight=weights_arr) # Fit the model with weights
+    results = sm.WLS(Y[:,2], sm.add_constant(X[:,0]), weights=weights_arr).fit() # Fit an OLS model with weights
+    robust_results = results.get_robustcov_results() # Get the robust results
+    print(robust_results.summary()) # Print the summary
+

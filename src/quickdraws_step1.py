@@ -136,7 +136,7 @@ parser.add_argument(
     "--num_workers",
     help="torch.utils.data.DataLoader num_workers",
     type=int,
-    default=8,
+    default=6,
 )
 parser.add_argument(
     "--train_split",
