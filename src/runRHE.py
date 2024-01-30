@@ -226,8 +226,8 @@ def runRHE(
             covariates_df = pd.read_csv(covariates, sep="\s+")
             covar_df_cols = covariates_df.columns.tolist()
             covariates_df = pd.merge(covariates_df, pheno_df)[covar_df_cols]
-            covariates_df.to_csv(covariates + ".rhe", sep="\t", index=None, na_rep="NA")
-            cmd += " -c " + covariates + ".rhe"
+            covariates_df.to_csv(out + ".rhe.covars", sep="\t", index=None, na_rep="NA")
+            cmd += " -c " + out + ".rhe.covars"
         cmd += " -k " + str(random_vectors) + " -jn 10 > " + savelog
         logging.info("Invoking RHE as: " + str(cmd))
         _ = subprocess.run(cmd, shell=True)
