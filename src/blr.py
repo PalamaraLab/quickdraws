@@ -312,6 +312,8 @@ class Trainer:
         self.chr_map = chr_map
         self.alpha = alpha
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().to(device)**2
+        self.var_y = torch.std(train_dataset.output, axis=0).numpy()
+        print(self.var_y)
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map).tolist()
             ## check if chr_map has chrs in chunks:
@@ -456,8 +458,6 @@ class Trainer:
             log_dict["mean_test_loss_" + str(alpha)] = test_loss[model_no] / len(
                 preds_arr[model_no]
             )
-            log_dict["preds_std_" + str(alpha)] = np.std(preds_arr[model_no])
-
             ## Per phenotype R2 calculation
             for prs_no in range(preds_arr[model_no].shape[1]):
                 test_loss_anc = self.loss_func(
@@ -474,6 +474,9 @@ class Trainer:
                 log_dict[
                     "test_loss_pheno_" + str(prs_no) + "_alpha_" + str(alpha)
                 ] = test_loss_anc.cpu().numpy() / len(preds_arr[model_no])
+                log_dict[
+                    "neff_pheno_" + str(prs_no) + "_alpha_" + str(alpha)
+                ] = (self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy())/(self.var_y[prs_no] + np.std(preds_arr[model_no,:,prs_no])**2 - 2*test_r2_anc[0]*np.std(preds_arr[model_no,:,prs_no])*np.sqrt(self.var_y[prs_no]))
         return log_dict
 
     def save_exact_blup_estimates(self, best_alpha, out):
@@ -817,6 +820,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     log_dict = trainer.log_r2_loss(log_dict)
     output_loss = np.zeros((dim_out, len(alpha)))
     output_r2 = np.zeros((dim_out, len(alpha)))
+    output_neff = np.zeros((dim_out, len(alpha)))
     for prs_no in range(dim_out):
         for model_no, alpha_i in enumerate(alpha):
             output_loss[prs_no, model_no] = log_dict[
@@ -825,11 +829,17 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
             output_r2[prs_no, model_no] = log_dict[
                 "test_r2_pheno_" + str(prs_no) + "_alpha_" + str(alpha_i)
             ]
+            output_neff[prs_no, model_no] = log_dict[
+                "neff_pheno_" + str(prs_no) + "_alpha_" + str(alpha_i)
+            ]
 
     logging.info("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
     logging.info("Best MSE across all alpha values: " + str(np.min(output_loss, axis=1)))
+    logging.info("Best Neff across all alpha values: " + str(np.max(output_neff, axis=1)))
 
     best_alpha = np.argmin(output_loss, axis=1)
+    neff_best = np.array([output_neff[i, best_alpha[i]] for i in range(dim_out)])
+
     mu_list = np.zeros((dim_out, len(std_genotype)))
     spike_list = np.zeros((dim_out, len(std_genotype)))
     for prs_no in range(dim_out):
@@ -868,7 +878,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         train_dataset.close_hdf5()
         test_dataset.close_hdf5()
 
-    return -output_loss, mu_list, spike_list
+    return -output_loss, mu_list, spike_list, neff_best
 
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
@@ -883,9 +893,6 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
             config=args,
             dir=args.out,
         )
-        # Save ENV variables
-        with (Path(wandb.run.dir) / "env.txt").open("wt") as f:
-            pprint.info.pprint.info(dict(os.environ), f)
 
     alpha = args.alpha #[0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
 
@@ -916,7 +923,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         logging.info("Starting a grid search for heritability within BLR...")
         for i, h2_i in enumerate(h2_grid):
             logging.info("Bayesian linear regression ({0}/{1}) with h2 = {2}".format(i+1, len(h2_grid), h2_i))
-            output_r2_i, mu_i, spike_i = hyperparam_search(
+            output_r2_i, mu_i, spike_i, neff_best_i = hyperparam_search(
                 args, alpha, h2_i, train_dataset, test_dataset, device=device
             )
             if i == 0:
@@ -924,19 +931,22 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
                 mu = copy.deepcopy(mu_i)
                 spike = copy.deepcopy(spike_i)
                 h2 = [h2_i] * len(mu_i)
+                neff_best = copy.deepcopy(neff_best_i)
             else:
                 for phen in range(len(mu_i)):
                     if np.max(output_r2_i[phen]) > np.max(output_r2[phen]):
                         mu[phen] = mu_i[phen]
                         spike[phen] = spike_i[phen]
                         h2[phen] = h2_i
+                        neff_best[phen] = neff_best_i[phen]
                 output_r2 = np.maximum(output_r2, output_r2_i)
     else:
-        output_r2, mu, spike = hyperparam_search(
+        output_r2, mu, spike, neff_best = hyperparam_search(
             args, alpha, h2, train_dataset, test_dataset, device=device
         )
 
     np.savetxt(args.out + ".alpha", np.array(alpha)[np.argmax(output_r2, axis=1)])
+    np.savetxt(args.out + ".neff", np.array(neff_best))
     if args.h2_grid:
         np.savetxt(args.out + ".h2", np.array(h2))
     

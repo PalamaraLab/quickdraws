@@ -23,6 +23,7 @@ import logging
 from datetime import datetime
 from art import text2art
 import copy
+from tqdm import tqdm
 
 from ldscore_calibration import calc_ldscore_chip, ldscore_intercept, get_mask_dodgy
 from custom_linear_regression import (
@@ -87,7 +88,6 @@ def load_offsets(offset, pheno_columns, unique_chrs, covar_effect):
         if not (loco_file[['FID','IID']] == covar_effect[['FID','IID']]).all().all():
             logging.exception('LOCO files have different ordering of individuals')
             raise ValueError
-
     offset_list = []
     for chr_no, chr in enumerate(unique_chrs):
         offset = pd.DataFrame(columns = pheno_columns)
@@ -95,11 +95,10 @@ def load_offsets(offset, pheno_columns, unique_chrs, covar_effect):
         for dim_out in range(len(pheno_columns[2:])):
             offset[pheno_columns[2:][dim_out]] = loco_files[dim_out][chr] + covar_effect[pheno_columns[2+dim_out]]
         offset_list.append(offset)
-
     return offset_list
 
 def rege_to_qd_format(filename):
-    df = pd.read_csv(filename, sep=' ')
+    df = pd.read_csv(filename, sep=' ', low_memory=False)
     df_transposed = df.transpose()
     df_transposed.columns = df_transposed.iloc[0]
     df_transposed = df_transposed[1:].reset_index()
@@ -110,54 +109,66 @@ def rege_to_qd_format(filename):
     return df_transposed[['FID','IID'] + df_transposed.columns[:-2].tolist()]
 
 def calibrate_test_stats(
-    ldscores, bedfile, unrel_sample_list, out, match_yinter, pheno
+    ldscores, bedfile, unrel_sample_list, out, match_yinter, pheno, neff
 ):
+    ### Assumes ref and cur are aligned
     sumstats_ref = pd.read_hdf(
         "{0}.{1}.sumstats".format(out + "_lrunrel", pheno), key="sumstats"
     )
-    mask_dodgy_ref = get_mask_dodgy(
-        ldscores[["SNP", "LDSCORE"]], sumstats_ref, np.mean(sumstats_ref["OBS_CT"])
-    )
-    ldscore_chip_ref = calc_ldscore_chip(bedfile, mask_dodgy_ref, unrel_sample_list)
-    intercept_ref, mean_sumstats_ref = ldscore_intercept(
-        ldscores, sumstats_ref, ldscore_chip_ref, mask_dodgy_ref
-    )
-    atten_ratio_ref = (intercept_ref - 1) / (mean_sumstats_ref - 1)
+    # mask_dodgy_ref = get_mask_dodgy(
+    #     ldscores[["SNP", "LDSCORE"]], sumstats_ref, np.mean(sumstats_ref["OBS_CT"])
+    # )
+    # ldscore_chip_ref = calc_ldscore_chip(bedfile, mask_dodgy_ref, unrel_sample_list)
+    # intercept_ref, slope_ref, mean_sumstats_ref = ldscore_intercept(
+    #     ldscores, sumstats_ref, ldscore_chip_ref, mask_dodgy_ref
+    # )
 
     sumstats_cur = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
-    ## we do this two times because the sumstats_cur could be way off from the sumstats_ref
-    overall_correction = 1
-    prev_correction = 1
-    for ldsc_iter in range(5):
-        mask_dodgy_cur = get_mask_dodgy(
-            ldscores[["SNP", "LDSCORE"]], sumstats_cur, np.mean(sumstats_cur["OBS_CT"])
-        )
-        ldscore_chip_cur = calc_ldscore_chip(bedfile, mask_dodgy_cur)
-        intercept_cur, mean_sumstats_cur = ldscore_intercept(
-            ldscores, sumstats_cur, ldscore_chip_cur, mask_dodgy_cur
-        )
-        correction = (1 - atten_ratio_ref) / (
-            intercept_cur - atten_ratio_ref * mean_sumstats_cur
-        )
-        if match_yinter and ldsc_iter < 2:
-            correction = intercept_ref / intercept_cur
+
+    assert (sumstats_ref[['CHR','SNP','POS']].values == sumstats_cur[['CHR','SNP','POS']].values).all()
+
+    #### Caution #####
+    ess = sumstats_cur["OBS_CT"].values*neff/sumstats_ref["OBS_CT"].values
+    overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ)
+    sumstats_cur["CHISQ"] *= overall_correction
+    sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
+    ###################
+
+
+    # overall_correction = 1
+    # prev_correction = 1
+
+    # ## moving this outside outer loop because its time-consuming
+    # mask_dodgy_cur = get_mask_dodgy(
+    #     ldscores[["SNP", "LDSCORE"]], sumstats_cur, np.mean(sumstats_cur["OBS_CT"])
+    # )
+    # ldscore_chip_cur = calc_ldscore_chip(bedfile, mask_dodgy_cur)
+
+    # for ldsc_iter in range(5):
+    #     intercept_cur, slope_cur, mean_sumstats_cur = ldscore_intercept(
+    #         ldscores, sumstats_cur, ldscore_chip_cur, mask_dodgy_cur
+    #     )
+    #     correction = (1 + (intercept_ref - 1)*np.mean(sumstats_cur["OBS_CT"])*neff/np.mean(sumstats_ref["OBS_CT"]))/intercept_cur
+
+    #     if match_yinter and ldsc_iter < 2:
+    #         correction = intercept_ref / intercept_cur
         
-        if ldsc_iter == 4 and np.abs(prev_correction - correction) > 0.01:
-            logging.info(pheno + " entering here...")
-            logging.info(prev_correction - correction)
-            logging.info(sumstats_cur)
-            sumstats_cur["CHISQ"] /= overall_correction
-            sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
-            overall_correction = 1  
-            logging.info(sumstats_cur)
-        else:
-            overall_correction *= correction
-            sumstats_cur["CHISQ"] *= correction
-            sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
+    #     if ldsc_iter == 4 and np.abs(correction - 1) > 0.01:
+    #         logging.info(pheno + " entering here...")
+    #         logging.info(prev_correction - correction)
+    #         logging.info(sumstats_cur)
+    #         sumstats_cur["CHISQ"] /= overall_correction
+    #         sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
+    #         overall_correction = 1  
+    #         logging.info(sumstats_cur)
+    #     else:
+    #         overall_correction *= correction
+    #         sumstats_cur["CHISQ"] *= correction
+    #         sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
 
-        prev_correction = correction.copy()
+    #     prev_correction = correction.copy()
 
-    sumstats_cur = sumstats_cur.drop('CHISQ_FLT', axis=1)
+    # sumstats_cur = sumstats_cur.drop('CHISQ_FLT', axis=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
     sumstats_cur.to_csv(
@@ -167,7 +178,10 @@ def calibrate_test_stats(
     )
 
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
-    return overall_correction
+    
+    ### caution: mean across all SNPs make sense? imputed data doesnt have missingness
+    return np.mean(overall_correction)
+
 
 
 def check_case_control_sep(
@@ -225,6 +239,8 @@ def get_test_statistics(
     traits = preprocess_offsets(phenofile, weights)
     pheno_columns = traits.columns.tolist()
     covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
+    neff = np.loadtxt(offset + '.neff')
+    logging.info("Using estimated effective sample fize from file specified in: " + str(offset) + '.neff')
     
     if weights is None:
         offset_list_pre = load_offsets(offset, pheno_columns, unique_chrs, covar_effects)
@@ -317,7 +333,7 @@ def get_test_statistics(
             calibrate_test_stats, ldscores, bedfile, unrel_sample_indices, out, binary
         )
         correction = Parallel(n_jobs=min(8, n_workers))(
-            delayed(partial_calibrate_test_stats)(i) for i in pheno_columns[2:]
+            delayed(partial_calibrate_test_stats)(phen, neff[i]) for i, phen in enumerate(pheno_columns[2:])
         )
         logging.info("Caliration factors stored in: " +str(out) + ".calibration")
         np.savetxt(out + ".calibration", correction)

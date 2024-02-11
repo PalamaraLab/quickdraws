@@ -111,8 +111,10 @@ def check_residuals_same_order(residualFileList):
 def MyLinRegr(X, Y, W, offset):
     ## Preprocess genotype first
     afreq = np.zeros(X.shape[1])
+    num_samples = np.zeros(X.shape[1])
     for snp in numba.prange(X.shape[1]):
         isnan_at_snp = np.isnan(X[:, snp])
+        num_samples[snp] = np.sum(~isnan_at_snp)
         freq = np.nansum(X[:, snp]) / np.sum(~isnan_at_snp)
         X[:, snp][isnan_at_snp] = 0
         X[:, snp][~isnan_at_snp] -= freq
@@ -133,15 +135,17 @@ def MyLinRegr(X, Y, W, offset):
         var_y = Y[:, pheno].dot(y_hat[:, pheno])
         beta[pheno] = numerators[:, pheno] / var_X
         chisq[pheno] = (N - W.shape[1]) / (var_y * var_X / numerators[:, pheno] ** 2)
-    return beta, chisq, afreq
+    return beta, chisq, afreq, num_samples
 
 
 @numba.jit(nopython=True, parallel=True)
 def MyLogRegr(X, Y, W, offset):
     ## Preprocess genotype first
     afreq = np.zeros(X.shape[1])
+    num_samples = np.zeros(X.shape[1])
     for snp in numba.prange(X.shape[1]):
         isnan_at_snp = np.isnan(X[:, snp])
+        num_samples[snp] = np.sum(~isnan_at_snp)
         freq = np.nansum(X[:, snp]) / np.sum(~isnan_at_snp)
         X[:, snp][isnan_at_snp] = 0
         X[:, snp][~isnan_at_snp] -= freq
@@ -163,14 +167,16 @@ def MyLogRegr(X, Y, W, offset):
         chisq[pheno] = numerators**2 / denominator
         ##beta for logistic regression
         beta[pheno] = numerators / denominator
-    return beta, chisq, afreq
+    return beta, chisq, afreq, num_samples
 
 @numba.jit(nopython=True, parallel=True)
 def MyWightedLinRegr(X, Y, C, offset, W):
     ## Preprocess genotype first
     afreq = np.zeros(X.shape[1])
+    num_samples = np.zeros(X.shape[1])
     for snp in numba.prange(X.shape[1]):
         isnan_at_snp = np.isnan(X[:, snp])
+        num_samples[snp] = np.sum(~isnan_at_snp)
         freq = np.nansum(X[:, snp]) / np.sum(~isnan_at_snp)
         X[:, snp][isnan_at_snp] = 0
         X[:, snp][~isnan_at_snp] -= freq
@@ -191,22 +197,13 @@ def MyWightedLinRegr(X, Y, C, offset, W):
     XWX_inv = 1 / np.array([X_hat[:, v].dot(W*X_hat[:, v]) for v in range(M)])
     XWY = (X_hat.T*W).dot(y_hat)
     beta = XWX_inv*XWY.T
-
-    # y_hat = y_hat.T    
-    # var_beta = np.zeros((y_hat.shape[0], M))
-    # for v in numba.prange(M):
-    #     var_beta[:, v] = (X_hat[:, v] * W**2 * (y_hat - np.outer(beta[:, v],X_hat[:, v]))**2).dot(X_hat[:, v])
-    # var_beta = XWX_inv**2 * var_beta
-    # chisq = beta ** 2 / var_beta
-
     X_hat = X_hat.T
     X_hat_square_W_square = (W**2) * (X_hat ** 2)
     for pheno in numba.prange(y_hat.shape[1]):
         var_beta = np.array([np.sum(X_hat_square_W_square[v] * (y_hat[:, pheno] - beta[pheno, v]*X_hat[v])**2)  for v in range(M)])
-        # var_beta = np.array([(X_hat[:, v] * W**2 * (y_hat[:, pheno] - beta[pheno, v]*X_hat[:, v])**2).dot(X_hat[:, v]) for v in range(M)])
         var_beta = XWX_inv**2 * var_beta
         chisq[pheno] = beta[pheno]**2/var_beta
-    return beta, chisq, afreq
+    return beta, chisq, afreq, num_samples
 
 def firth_parallel(
     chisq_snp, beta_snp, freq_snp, geno_snp, Y, pred_covars, covars, firth_pval_thresh, firth_maf_thresh, firth_prevalence_thresh
@@ -277,6 +274,7 @@ def get_unadjusted_test_statistics(
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
+    num_samples_arr = np.zeros(len(chr_map), dtype="float32")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
 
     if binary and firth:
@@ -315,12 +313,12 @@ def get_unadjusted_test_statistics(
             )
             ## preprocess genotype and perform linear regression
             if binary:
-                beta, chisq, afreq = MyLogRegr(X, Y, covars, expit(offset))
+                beta, chisq, afreq, num_samples = MyLogRegr(X, Y, covars, expit(offset))
             else:
                 if weights is None:
-                    beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
+                    beta, chisq, afreq, num_samples = MyLinRegr(X, Y, covars, offset)
                 else:
-                    beta, chisq, afreq = MyWightedLinRegr(X, Y, covars, offset, weights_arr)
+                    beta, chisq, afreq, num_samples = MyWightedLinRegr(X, Y, covars, offset, weights_arr)
 
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
@@ -331,6 +329,9 @@ def get_unadjusted_test_statistics(
             afreq_arr[
                 prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
             ] = afreq
+            num_samples_arr[
+                prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
+            ] = num_samples
             if binary and firth:
                 par_out = Parallel(n_jobs=num_threads)(
                     delayed(firth_parallel)(
@@ -360,7 +361,7 @@ def get_unadjusted_test_statistics(
     write_sumstats_file(
         bedFile,
         pheno.columns[2:],
-        snp_on_disk.shape[0],
+        num_samples_arr,
         afreq_arr,
         beta_arr,
         chisq_arr,
@@ -443,6 +444,7 @@ def get_unadjusted_test_statistics_bgen(
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
+    num_samples_arr = np.zeros(len(chr_map), dtype="float32")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
 
     if binary and firth and firth_null is None:
@@ -493,12 +495,12 @@ def get_unadjusted_test_statistics_bgen(
             )
             ## preprocess genotype and perform linear regression
             if binary:
-                beta, chisq, afreq = MyLogRegr(X, Y, covars, expit(offset))
+                beta, chisq, afreq, num_samples = MyLogRegr(X, Y, covars, expit(offset))
             else:
                 if weights is None:
-                    beta, chisq, afreq = MyLinRegr(X, Y, covars, offset)
+                    beta, chisq, afreq, num_samples = MyLinRegr(X, Y, covars, offset)
                 else:
-                    beta, chisq, afreq = MyWightedLinRegr(X, Y, covars, offset, weights_arr)
+                    beta, chisq, afreq, num_samples = MyWightedLinRegr(X, Y, covars, offset, weights_arr)
 
             beta_arr[
                 :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
@@ -509,6 +511,9 @@ def get_unadjusted_test_statistics_bgen(
             afreq_arr[
                 prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
             ] = afreq
+            num_samples_arr[
+                prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
+            ] = num_samples
             if binary and firth:
                 par_out = Parallel(n_jobs=num_threads)(
                     delayed(firth_parallel)(
@@ -539,7 +544,7 @@ def get_unadjusted_test_statistics_bgen(
         snp_on_disk,
         bgenFile,
         pheno.columns[2:],
-        snp_on_disk.shape[0],
+        num_samples_arr,
         afreq_arr,
         beta_arr,
         chisq_arr,
