@@ -807,7 +807,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=3,
+        validate_every=-1,
     )
     ##caution!!
     log_dict = {}
