@@ -58,7 +58,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096
     for i in tqdm(range(0, snp_on_disk.shape[1], chunk_size)):
         x = 2 - (
             snp_on_disk[:, i : min(i + chunk_size, snp_on_disk.shape[1])]
-            .read(dtype="float64", num_threads=num_threads)
+            .read(dtype="float64")
             .val
         )
         geno_covar_effect_numba, xtx_numba = get_xtx(x, covars, K)
