@@ -15,7 +15,7 @@ from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import logging
 logger = logging.getLogger(__name__)
 
-@numba.jit(nopython=True, parallel=True)
+@numba.jit(nopython=True)
 def get_xtx(x, covars, K):
     for snp in numba.prange(x.shape[1]):
         isnan_at_snp = np.isnan(x[:, snp])
