@@ -256,16 +256,15 @@ else:
 if args.h2_file is None and not args.h2_grid:
     st = time.time()
     logging.info("#### Step 1b. Calculating heritability estimates using RHE ####")
-    if args.ldscores is not None:
-        args.annot = args.out + ".maf2_ld4.annot"
-        MakeAnnotation(
-            args.bed,
-            args.ldscores,
-            args.modelSnps,
-            [0.01, 0.05, 0.5],
-            [0.0, 0.25, 0.5, 0.75, 1.0],
-            args.annot,
-        )
+    args.annot = args.out + ".maf2_ld4.annot"
+    MakeAnnotation(
+        args.bed,
+        args.ldscores,
+        args.modelSnps,
+        [0.01, 0.05, 0.5],
+        [0.0, 0.25, 0.5, 0.75, 1.0],
+        args.annot,
+    )
     VC = runRHE(
         args.bed,
         rhe_out + ".rhe",

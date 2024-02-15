@@ -313,7 +313,6 @@ class Trainer:
         self.alpha = alpha
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().to(device)**2
         self.var_y = torch.std(train_dataset.output, axis=0).numpy()
-        print(self.var_y)
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map).tolist()
             ## check if chr_map has chrs in chunks:
@@ -479,11 +478,12 @@ class Trainer:
                 ] = (self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy())/(self.var_y[prs_no] + np.std(preds_arr[model_no,:,prs_no])**2 - 2*test_r2_anc[0]*np.std(preds_arr[model_no,:,prs_no])*np.sqrt(self.var_y[prs_no]))
         return log_dict
 
-    def save_exact_blup_estimates(self, best_alpha, out):
+    def save_exact_blup_estimates(self, best_alpha, out, test_r2_anc):
         ## Saves the exact LOCO estimates for the entire dataset in a text file
         ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
         dim_out = len(self.h2)
         loco_estimates = np.zeros((self.num_chr, self.num_samples, dim_out))
+        neff = np.zeros((self.num_chr, dim_out))
         with torch.no_grad():
             prev = 0
             for input, covar_effect, label in self.test_dataloader:
@@ -505,14 +505,14 @@ class Trainer:
                     loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = preds.detach().cpu().numpy()
                 prev += len(input)
             
-            # for chr_no, chr in enumerate(self.unique_chr_map):
-            #     df_concat = pd.concat(
-            #         [self.df_iid_fid, pd.DataFrame(loco_estimates[chr_no], columns=self.pheno_names)], axis=1
-            #     )
-            #     pd.DataFrame(df_concat).to_csv(
-            #         out + "loco_chr" + str(int(chr)) + ".offsets", sep="\t", index=None
-            #     )
+            for model_no, model in enumerate(self.model_list):
+                chr_no = model_no % self.num_chr
+                phen_no = self.pheno_for_model[model_no // self.num_chr]
+                num_snps_ratio = math.sqrt(len(self.chr_map != self.unique_chr_map[chr_no])/len(self.chr_map))
+                for prs_no in phen_no:
+                    neff[chr_no, prs_no] = (self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy())/(self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*num_snps_ratio*test_r2_anc[prs_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no]))
             
+            pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
             ## Saving it Regenie style...
             for d in range(dim_out):
                 df = pd.DataFrame(loco_estimates[:,:, d])
@@ -807,7 +807,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=-1,
+        validate_every=3,
     )
     ##caution!!
     log_dict = {}
@@ -838,7 +838,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     logging.info("Best Neff across all alpha values: " + str(np.max(output_neff, axis=1)))
 
     best_alpha = np.argmin(output_loss, axis=1)
-    neff_best = np.array([output_neff[i, best_alpha[i]] for i in range(dim_out)])
+    r2_best = np.array([output_r2[i, best_alpha[i]] for i in range(dim_out)])
 
     mu_list = np.zeros((dim_out, len(std_genotype)))
     spike_list = np.zeros((dim_out, len(std_genotype)))
@@ -878,7 +878,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         train_dataset.close_hdf5()
         test_dataset.close_hdf5()
 
-    return -output_loss, mu_list, spike_list, neff_best
+    return -output_loss, mu_list, spike_list, r2_best
 
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
@@ -923,7 +923,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         logging.info("Starting a grid search for heritability within BLR...")
         for i, h2_i in enumerate(h2_grid):
             logging.info("Bayesian linear regression ({0}/{1}) with h2 = {2}".format(i+1, len(h2_grid), h2_i))
-            output_r2_i, mu_i, spike_i, neff_best_i = hyperparam_search(
+            output_r2_i, mu_i, spike_i, r2_best_i = hyperparam_search(
                 args, alpha, h2_i, train_dataset, test_dataset, device=device
             )
             if i == 0:
@@ -931,22 +931,21 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
                 mu = copy.deepcopy(mu_i)
                 spike = copy.deepcopy(spike_i)
                 h2 = [h2_i] * len(mu_i)
-                neff_best = copy.deepcopy(neff_best_i)
+                r2_best = copy.deepcopy(r2_best_i)
             else:
                 for phen in range(len(mu_i)):
                     if np.max(output_r2_i[phen]) > np.max(output_r2[phen]):
                         mu[phen] = mu_i[phen]
                         spike[phen] = spike_i[phen]
                         h2[phen] = h2_i
-                        neff_best[phen] = neff_best_i[phen]
+                        r2_best[phen] = r2_best_i[phen]
                 output_r2 = np.maximum(output_r2, output_r2_i)
     else:
-        output_r2, mu, spike, neff_best = hyperparam_search(
+        output_r2, mu, spike, r2_best = hyperparam_search(
             args, alpha, h2, train_dataset, test_dataset, device=device
         )
 
     np.savetxt(args.out + ".alpha", np.array(alpha)[np.argmax(output_r2, axis=1)])
-    np.savetxt(args.out + ".neff", np.array(neff_best))
     if args.h2_grid:
         np.savetxt(args.out + ".h2", np.array(h2))
     
@@ -1061,7 +1060,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     logging.info("Saving exact LOCO estimates...")
     start_time = time.time()
     trainer.save_exact_blup_estimates(
-        np.argmax(output_r2_subset, axis=1), args.out
+        np.argmax(output_r2_subset, axis=1), args.out, r2_best
     )
     logging.info(
         "Done writing exact LOCO estimates in: "

@@ -7,6 +7,9 @@ import numpy as np
 from pysnptools.snpreader import Bed
 import subprocess, os
 import argparse
+import random
+import gc
+import numba
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 from blr import str_to_bool
@@ -14,14 +17,104 @@ from scipy.stats import norm
 import logging
 logger = logging.getLogger(__name__)
 
+def adj_r2_(dotprod, n):
+    r2 = dotprod * dotprod
+    return r2 - (1 - r2) / (n - 2)
+
+def calc_ldscore_chip(bed, num_samples=4000):
+    outlier_window = 1e6
+
+    snp_data = Bed(bed, count_A1=True)
+    num_samples = min(num_samples,len(snp_data.iid))
+    logging.info("Calculating chip LD score on {0} random samples".format(num_samples))
+    chr_map = snp_data.pos[:, 0]  ## chr_no
+    pos = snp_data.pos[:, 2]  ## bp pos
+
+    geno = 2 - (
+        snp_data[
+            random.sample(range(len(snp_data.iid)), num_samples), np.argsort(pos)
+        ]
+        .read(dtype="float32")
+        .val
+    )
+    maf = np.nanmean(geno, axis=0)/2
+    maf = np.minimum(maf, 1-maf)
+    mask_dodgy_snp = maf > 0.01
+    geno = np.where(
+        np.isnan(geno),
+        np.nanpercentile(geno, 50, axis=0, interpolation="nearest"),
+        geno,
+    )
+    ## normalize the genotype
+    geno -= np.mean(geno, axis=0)
+    geno /= np.std(geno, axis=0)
+    geno = np.nan_to_num(geno, nan=0)
+    sid = snp_data.sid
+    geno = geno.T
+
+    ## calculate unadjusted r2 among variants, then adjust it
+    ld_score_chip = make_ldscore_inner(geno, pos, mask_dodgy_snp, chr_map, outlier_window, num_samples)
+    # ld_score_chip = np.zeros(geno.shape[0])
+    # for chr in np.unique(chr_map):
+    #     nearby_snps_in_chr = np.arange(geno.shape[0])[chr_map == chr]
+    #     pos_chr = pos[chr_map == chr]
+    #     mask_dodgy_chr = mask_dodgy_snp[chr_map == chr]
+    #     for m1 in nearby_snps_in_chr:
+    #         if mask_dodgy_snp[m1]:
+    #             nearby_snps = nearby_snps_in_chr[
+    #                 (pos[m1] - pos_chr <= outlier_window)
+    #                 & (pos[m1] - pos_chr > 0)
+    #                 & mask_dodgy_chr
+    #             ]
+    #             if len(nearby_snps) > 0:
+    #                 r2_arr = adj_r2_(
+    #                     np.sum(geno[m1] * geno[nearby_snps], axis=1) / num_samples,
+    #                     num_samples,
+    #                 )
+    #                 for m2, r2 in zip(nearby_snps, r2_arr):
+    #                     ld_score_chip[m1] += r2
+    #                     ld_score_chip[m2] += r2
+    ldscore_chip = pd.DataFrame(
+        np.vstack([chr_map, sid, ld_score_chip, maf]).T, columns=["CHR", "SNP", "LDSCORE", "MAF"]
+    )
+    ldscore_chip.LDSCORE = ldscore_chip.LDSCORE.astype("float")
+    ldscore_chip.MAF = ldscore_chip.MAF.astype("float")
+    ldscore_chip.CHR = ldscore_chip.CHR.astype("float").astype("int")
+   
+    del geno
+    gc.collect()
+    return ldscore_chip
+
+@numba.jit(nopython=True)
+def make_ldscore_inner(geno, pos, mask_dodgy_snp, chr_map, outlier_window, num_samples):
+    ld_score_chip = np.zeros(geno.shape[0])
+    for chr in np.unique(chr_map):
+        nearby_snps_in_chr = np.arange(geno.shape[0])[chr_map == chr]
+        pos_chr = pos[chr_map == chr]
+        mask_dodgy_chr = mask_dodgy_snp[chr_map == chr]
+        for m1 in nearby_snps_in_chr:
+            if mask_dodgy_snp[m1]:
+                nearby_snps = nearby_snps_in_chr[
+                    (pos[m1] - pos_chr <= outlier_window)
+                    & (pos[m1] - pos_chr > 0)
+                    & mask_dodgy_chr
+                ]
+                if len(nearby_snps) > 0:
+                    r2_arr_unadjusted = np.sum(geno[m1] * geno[nearby_snps], axis=1) / num_samples
+                    r2_arr = r2_arr_unadjusted*r2_arr_unadjusted
+                    r2_arr = r2_arr - (1-r2_arr)/(num_samples - 2)
+                    for m2, r2 in zip(nearby_snps, r2_arr):
+                        ld_score_chip[m1] += r2
+                        ld_score_chip[m2] += r2  
+
+    return ld_score_chip 
+
 def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_percentiles, outfile=None):
-    """Intermediate helper function to generate MAF / LD structured annotations. Credits: Arjun"""
     logging.info("Making annotation for accurate h2 estimation")
-    try:
+    if maf_ldscores is not None:
         df = pd.read_csv(maf_ldscores, sep="\s+")
-    except:
-        logging.exception("File with MAF-LD scores is wrong!")
-        raise ValueError
+    else:
+        df = calc_ldscore_chip(bed)
 
     bim = pd.read_csv(bed + ".bim", header=None, sep="\s+")
     bim = bim.rename(columns={0:'CHR',1:'SNP'})
@@ -51,22 +144,14 @@ def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_
 
     i = 0
     for j in range(n_maf_bins):
-        if j == 0:
-            maf_idx = (mafs > maf_bins[j]) & (mafs <= maf_bins[j + 1])
-        else:
-            maf_idx = (mafs > maf_bins[j]) & (mafs <= maf_bins[j + 1])
+        maf_idx = (mafs > maf_bins[j]) & (mafs <= maf_bins[j+1])
         tru_ld_quantiles = [
             np.quantile(ld_scores[maf_idx], i) for i in ld_score_percentiles
         ]
         for k in range(n_ld_bins):
-            if k == 0:
-                ld_idx = (ld_scores >= tru_ld_quantiles[k]) & (
-                    ld_scores <= tru_ld_quantiles[k + 1]
-                )
-            else:
-                ld_idx = (ld_scores > tru_ld_quantiles[k]) & (
-                    ld_scores <= tru_ld_quantiles[k + 1]
-                )
+            ld_idx = (ld_scores > tru_ld_quantiles[k]) & (
+                ld_scores <= tru_ld_quantiles[k+1]
+            )
             cat_idx = np.where(maf_idx & ld_idx)[0]
             # Set the category to one
             tot_cats[cat_idx, i] = 1
@@ -101,7 +186,7 @@ def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_
     tot_cats[np.logical_not(snp_mask)] = 0
 
     #   Make sure there are SNPs in every category
-    assert np.all(np.sum(tot_cats, axis=0) > 0)
+    tot_cats = tot_cats[:, np.sum(tot_cats, axis=0)>0]
     np.savetxt(outfile, tot_cats, fmt="%d")
     return
 
