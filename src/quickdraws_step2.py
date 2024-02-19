@@ -64,7 +64,8 @@ def preprocess_offsets(offsets, sample_file=None, weights=None, is_loco_file=Fal
 
 def adjust_test_stats(out, pheno, correction):
     sumstats_cur = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
-    sumstats_cur["CHISQ"] *= correction
+    for chr in np.unique(sumstats_cur['CHR']):
+        sumstats_cur["CHISQ"] *= float(correction[str(chr)])
     sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
@@ -117,11 +118,17 @@ def calibrate_test_stats(
     sumstats_cur_prev = copy.deepcopy(sumstats_cur)
     assert (sumstats_ref[['CHR','SNP','POS']].values == sumstats_cur[['CHR','SNP','POS']].values).all()
 
-    print(neff)
+    overall_correction_dict = {}
     for chr in np.unique(sumstats_cur['CHR']):
         ess = sumstats_cur.loc[sumstats_ref.CHR == chr,"OBS_CT"].values*float(neff[str(chr)])/sumstats_ref.loc[sumstats_ref.CHR == chr,"OBS_CT"].values
         overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)
+        overall_correction_dict[chr] = np.mean(overall_correction)
         sumstats_cur.loc[sumstats_ref.CHR == float(chr), "CHISQ"] *= overall_correction
+
+    # ess = sumstats_cur["OBS_CT"].values*float(neff)/sumstats_ref["OBS_CT"].values
+    # overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ)
+    # sumstats_cur["CHISQ"] *= overall_correction
+    
     sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
@@ -134,7 +141,7 @@ def calibrate_test_stats(
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
     
     ### caution: mean across all SNPs make sense? imputed data doesnt have missingness
-    return np.mean(overall_correction)
+    return overall_correction_dict
 
 def check_case_control_sep(
     traits,
@@ -190,7 +197,8 @@ def get_test_statistics(
     traits = preprocess_offsets(phenofile, weights)
     pheno_columns = traits.columns.tolist()
     covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
-    neff = pd.read_csv(offset + '.neff', sep=' ')
+    # neff = np.loadtxt(offset + '.step1.neff')
+    neff = pd.read_csv(offset + '.neff', sep='\s+')
     logging.info("Using estimated effective sample fize from file specified in: " + str(offset) + '.neff')
     
     if weights is None:
@@ -274,7 +282,8 @@ def get_test_statistics(
             delayed(partial_calibrate_test_stats)(phen, neff.iloc[i]) for i, phen in enumerate(pheno_columns[2:])
         )
         logging.info("Caliration factors stored in: " +str(out) + ".calibration")
-        np.savetxt(out + ".calibration", correction)
+        pd.DataFrame(correction).to_csv(out + '.calibration', sep='\t', index=None)
+        # np.savetxt(out + ".calibration", correction)
     else:
         correction = None
 
@@ -344,10 +353,10 @@ def get_test_statistics_bgen(
                 firth_null_list[i] = firth_null_list[i][pheno_columns]
 
     if calibrationFile is not None:
-        calibration_factors = np.loadtxt(calibrationFile)
+        calibration_factors = pd.read_csv(calibrationFile, sep='\s+')
         logging.info("Using calibration file specified in: " + str(calibrationFile))
     else:
-        calibration_factors = np.ones(len(traits.columns.tolist()) - 2)
+        calibration_factors = pd.DataFrame(np.ones((len(traits.columns.tolist()) - 2, len(unique_chrs))), columns=unique_chrs)
 
     logging.info("Running linear/logistic regression...")
     get_unadjusted_test_statistics_bgen(
@@ -369,11 +378,9 @@ def get_test_statistics_bgen(
         firth_null=firth_null_list,
     )
 
-    if calibration_factors.shape == ():
-        calibration_factors = [calibration_factors]
     Parallel(n_jobs=n_workers)(
-        delayed(adjust_test_stats)(out, pheno, correction)
-        for (pheno, correction) in zip(pheno_columns[2:], calibration_factors)
+        delayed(adjust_test_stats)(out, phen, calibration_factors.iloc[i])
+        for i, phen in enumerate(pheno_columns[2:])
     )
     logging.info("Summary stats stored as: " + str(out) + ".{pheno}.sumstats{.gz}")
 

@@ -838,6 +838,9 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     logging.info("Best Neff across all alpha values: " + str(np.max(output_neff, axis=1)))
 
     best_alpha = np.argmin(output_loss, axis=1)
+    neff_best = np.array([output_neff[i, best_alpha[i]] for i in range(dim_out)])
+    np.savetxt(args.out + '.step1.neff', neff_best)
+
     r2_best = np.array([output_r2[i, best_alpha[i]] for i in range(dim_out)])
 
     mu_list = np.zeros((dim_out, len(std_genotype)))
