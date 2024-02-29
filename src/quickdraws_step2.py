@@ -119,11 +119,14 @@ def calibrate_test_stats(
     assert (sumstats_ref[['CHR','SNP','POS']].values == sumstats_cur[['CHR','SNP','POS']].values).all()
 
     overall_correction_dict = {}
-    for chr in np.unique(sumstats_cur['CHR']):
+    for chr in np.unique(sumstats_ref['CHR']):
         ess = sumstats_cur.loc[sumstats_ref.CHR == chr,"OBS_CT"].values*float(neff[str(chr)])/sumstats_ref.loc[sumstats_ref.CHR == chr,"OBS_CT"].values
+        # overall_correction = (ess * max(np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ) - 1, 0) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)
         overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)
+        if pheno == 'fake10':
+            print(str(np.mean(overall_correction)) + " " + str(chr) + " " + str(np.mean(ess)) + " " + str(np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)))
         overall_correction_dict[chr] = np.mean(overall_correction)
-        sumstats_cur.loc[sumstats_ref.CHR == float(chr), "CHISQ"] *= overall_correction
+        sumstats_cur.loc[sumstats_ref.CHR == chr, "CHISQ"] *= overall_correction
 
     # ess = sumstats_cur["OBS_CT"].values*float(neff)/sumstats_ref["OBS_CT"].values
     # overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ)

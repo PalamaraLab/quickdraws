@@ -12,6 +12,7 @@ from distutils.util import strtobool
 import time
 
 import numpy as np
+import scipy
 from scipy import stats
 import math
 import pandas as pd
@@ -26,6 +27,7 @@ import gc
 import pdb
 import logging
 logger = logging.getLogger(__name__)
+# torch._dynamo.config.cache_size_limit = 64
 
 if torch.cuda.is_available():
     import bitsandbytes as bnb
@@ -192,6 +194,7 @@ class HDF5Dataset:
         split: str,
         filename: str,
         phen_col: str,
+        batch_size: int,
         transform: Optional[Callable] = None,
         train_split=0.8,
         lowmem=False,
@@ -204,7 +207,7 @@ class HDF5Dataset:
         self.h5py_file = h5py.File(self.filename, "r")
         assert self.h5py_file["hap1"].shape == self.h5py_file["hap2"].shape
         total_samples = len(self.h5py_file["hap1"])
-        train_samples = int(train_split * total_samples)
+        train_samples = (int(train_split * total_samples) // batch_size)*batch_size
 
         if split == "train":
             if not lowmem:
@@ -312,6 +315,8 @@ class Trainer:
         self.chr_map = chr_map
         self.alpha = alpha
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().to(device)**2
+        if args.binary:
+            self.var_covar_effect = torch.std(torch.sigmoid(train_dataset.covar_effect), axis=0).float().to(device)**2
         self.var_y = torch.std(train_dataset.output, axis=0).numpy()
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map).tolist()
@@ -484,14 +489,12 @@ class Trainer:
         dim_out = len(self.h2)
         loco_estimates = np.zeros((self.num_chr, self.num_samples, dim_out))
         neff = np.zeros((self.num_chr, dim_out))
+        covar_effect_arr = np.zeros((self.num_samples, dim_out))
         with torch.no_grad():
             prev = 0
             for input, covar_effect, label in self.test_dataloader:
-                input, covar_effect, label = (
-                    input.to(self.device),
-                    covar_effect.to(self.device),
-                    label.to(self.device),
-                )
+                input = input.to(self.device)
+                covar_effect_arr[prev: prev + len(input)] = covar_effect.numpy()
                 for model_no, model in enumerate(self.model_list):
                     chr_no = model_no % self.num_chr
                     phen_no = self.pheno_for_model[model_no // self.num_chr]
@@ -504,15 +507,7 @@ class Trainer:
                     ## caution: remove sigmoid and covar_effect to save in regenie format
                     loco_estimates[chr_no][prev : prev + len(input)][:, phen_no] = preds.detach().cpu().numpy()
                 prev += len(input)
-            
-            for model_no, model in enumerate(self.model_list):
-                chr_no = model_no % self.num_chr
-                phen_no = self.pheno_for_model[model_no // self.num_chr]
-                num_snps_ratio = math.sqrt(len(self.chr_map != self.unique_chr_map[chr_no])/len(self.chr_map))
-                for prs_no in phen_no:
-                    neff[chr_no, prs_no] = (self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy())/(self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*num_snps_ratio*test_r2_anc[prs_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no]))
-            
-            pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
+
             ## Saving it Regenie style...
             for d in range(dim_out):
                 df = pd.DataFrame(loco_estimates[:,:, d])
@@ -524,8 +519,28 @@ class Trainer:
                     out + "_" + str(d+1) + ".loco", sep=" ", index=None
                 )
 
+            for chr_no in range(self.num_chr):
+                loco_estimates[chr_no] += covar_effect_arr
+                if self.args.binary:
+                    loco_estimates[chr_no] = scipy.special.expit(loco_estimates[chr_no])
+
+            for model_no, model in enumerate(self.model_list):
+                chr_no = model_no % self.num_chr
+                phen_no = self.pheno_for_model[model_no // self.num_chr]
+                num_snps_ratio = math.sqrt(sum(self.chr_map != self.unique_chr_map[chr_no])/len(self.chr_map))
+                for prs_no in np.where(phen_no)[0]:
+                    num = self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy()
+                    denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*num_snps_ratio*test_r2_anc[prs_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
+                    if prs_no == 10:
+                        print(str(prs_no) + " " + str(chr_no) + " " + str(num/denom) + " " + str(num) + " " + str(denom) + " " + str(num_snps_ratio) + " " +str(test_r2_anc[prs_no]) + " " + str(np.std(loco_estimates[chr_no, :, prs_no])))
+                    neff[chr_no, prs_no] = num/denom
+            
+            pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
+
     def train_epoch(self, epoch):
+        logging.info("Epoch: " + str(epoch+1) + "/" + str(self.args.alpha_search_epochs))
         for input, covar_effect, label in self.train_dataloader:
+            st = time.time()
             log_dict = {}
             input, covar_effect, label = (
                 input.to(self.device),
@@ -620,6 +635,7 @@ class Trainer:
         return log_dict
 
     def train_epoch_loco(self, epoch):
+        logging.info("Epoch: " + str(epoch+1) + "/" + str(self.args.num_epochs))
         for input, covar_effect, label in self.train_dataloader:
             input, covar_effect, label = (
                 input.to(self.device),
@@ -750,6 +766,7 @@ def initialize_model(
                     else None,
                 )
                 model = model.to(device)
+                # model = torch.compile(model)
                 model_list.append(model)
         else:
             model = Model(
@@ -763,6 +780,7 @@ def initialize_model(
                 spike=spike,
             )
             model = model.to(device)
+            # model = torch.compile(model)
             model_list.append(model)
     return model_list
 
@@ -807,7 +825,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=3,
+        validate_every=-1,
     )
     ##caution!!
     log_dict = {}
@@ -908,6 +926,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         split="train",
         filename=hdf5_filename,
         phen_col="phenotype",
+        batch_size=args.batch_size,
         transform=None,
         train_split=args.train_split,
         lowmem=args.lowmem
@@ -916,6 +935,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         split="test",
         filename=hdf5_filename,
         phen_col="phenotype",
+        batch_size=args.batch_size,
         transform=None,
         train_split=args.train_split,
         lowmem=args.lowmem
@@ -992,6 +1012,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         split="both",
         filename=hdf5_filename,
         phen_col="phenotype",
+        batch_size=args.batch_size,
         transform=None,
         train_split=args.train_split,
         lowmem=args.lowmem

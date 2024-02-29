@@ -167,7 +167,7 @@ parser.add_argument(
 parser.add_argument(
     "--phen_thres",
     help="The phenotyping rate threshold below which the phenotype isn't used to perform GWAS",
-    type=int,
+    type=float,
     default=0
 )
 parser.add_argument(
@@ -347,13 +347,19 @@ if args.predBetasFlag:
     df['GENPOS'] = snp_on_disk.pos[:, 1]
     df['POS'] = snp_on_disk.pos[:, 2]
     df['SNP'] = snp_on_disk.sid
-    for d in range(beta.shape[0]): 
+    bim = pd.read_csv(
+        args.bed + ".bim",
+        sep="\s+",
+        header=None,
+        names=["CHR", "SNP", "GENPOS", "POS", "A1", "A2"],
+    )
+    df = pd.merge(df, bim, on=['CHR','SNP','GENPOS','POS'])
+    for d, pheno_name in enumerate(pheno_names): 
         df['BETA'] = beta[d]
-        df.to_csv(args.out + '_' + str(d+1) + '.blup', sep='\t', index=None, na_rep='NA')
-
+        df.to_csv(args.out + '_' + pheno_name + '.blup', sep='\t', index=None, na_rep='NA')
     logging.info("Saved BLUP betas per phenotype as: ")
     for i, pheno_name in enumerate(pheno_names):
-        logging.info(pheno_name.decode() + " : " + str(Path(args.out).resolve()) + "_" + str(i+1) + ".blup")
+        logging.info(pheno_name.decode() + " : " + str(Path(args.out).resolve()) + "_" + pheno_name + ".blup")
     logging.info("")
 
 logging.info("#### Step 1 total Time: " + str(time.time() - overall_st) + " secs ####")
