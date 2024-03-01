@@ -27,7 +27,7 @@ import gc
 import pdb
 import logging
 logger = logging.getLogger(__name__)
-# torch._dynamo.config.cache_size_limit = 64
+torch._dynamo.config.cache_size_limit = 64
 
 if torch.cuda.is_available():
     import bitsandbytes as bnb
@@ -792,7 +792,7 @@ def initialize_model(
                     else None,
                 )
                 model = model.to(device)
-                # model = torch.compile(model)
+                model = torch.compile(model)
                 model_list.append(model)
         else:
             model = Model(
@@ -806,7 +806,7 @@ def initialize_model(
                 spike=spike,
             )
             model = model.to(device)
-            # model = torch.compile(model)
+            model = torch.compile(model)
             model_list.append(model)
     return model_list
 
