@@ -413,6 +413,7 @@ class Trainer:
     def validation(self):
         labels_arr = [[] for _ in range(len(self.model_list))]
         preds_arr = [[] for _ in range(len(self.model_list))]
+        preds_arr_chr = [[[] for k in range(self.num_chr)] for _ in range(len(self.model_list))]
         with torch.no_grad():
             for input, covar_effect, label in self.test_dataloader:
                 input, covar_effect, label = (
@@ -428,9 +429,24 @@ class Trainer:
                         test=True,
                         binary=self.args.binary,
                     )
+                    spike = torch.clamp(model.sc1.spike1, 1e-6, 1.0 - 1e-6)
+                    mu = model.fc1.weight
+                    beta = spike.mul(mu)
+                    for chr_no, chr in enumerate(self.unique_chr_map):
+                        input_c = input[:, self.chr_map != chr]
+                        beta_c = beta[:, self.chr_map != chr]
+                        preds_c = input_c@(beta_c.T)
+                        preds_c += covar_effect
+                        if self.args.binary:
+                            preds_c = torch.sigmoid(preds_c)
+                        
+                        preds_arr_chr[model_no][chr_no].extend(preds_c.cpu().numpy().tolist())
+                    
                     label[torch.isnan(label)] = preds[torch.isnan(label)]
                     preds_arr[model_no].extend(preds.cpu().numpy().tolist())
                     labels_arr[model_no].extend(label.cpu().numpy().tolist())
+                
+
 
             test_loss = []
             for model_no in range(len(self.model_list)):
@@ -442,11 +458,13 @@ class Trainer:
                 )
             preds_arr = np.array(preds_arr)  ## 6 x N x O
             labels_arr = np.array(labels_arr)  ## 6 x N x O
+            preds_arr_chr = np.array(preds_arr_chr) ## 6 x 22 x N x O
 
         return (
             test_loss,
             preds_arr,
             labels_arr,
+            preds_arr_chr,
         )
 
     def log_r2_loss(self, log_dict):
@@ -455,6 +473,7 @@ class Trainer:
             test_loss,
             preds_arr,
             labels_arr,
+            preds_arr_chr
         ) = self.validation()
 
         ## Average test loss
@@ -475,6 +494,15 @@ class Trainer:
                 log_dict[
                     "test_r2_pheno_" + str(prs_no) + "_alpha_" + str(alpha)
                 ] = test_r2_anc[0]
+                for chr_no, chr in enumerate(self.unique_chr_map):
+                    test_r2_anc_c = stats.pearsonr(
+                        preds_arr_chr[model_no, chr_no, :, prs_no],
+                        labels_arr[model_no, :, prs_no],
+                    )
+                    log_dict[
+                        "test_r2_pheno_" + str(prs_no) + "_alpha_" + str(alpha) + "_chr_" + str(chr)
+                    ] = test_r2_anc_c[0]
+
                 log_dict[
                     "test_loss_pheno_" + str(prs_no) + "_alpha_" + str(alpha)
                 ] = test_loss_anc.cpu().numpy() / len(preds_arr[model_no])
@@ -527,12 +555,10 @@ class Trainer:
             for model_no, model in enumerate(self.model_list):
                 chr_no = model_no % self.num_chr
                 phen_no = self.pheno_for_model[model_no // self.num_chr]
-                num_snps_ratio = math.sqrt(sum(self.chr_map != self.unique_chr_map[chr_no])/len(self.chr_map))
+                # num_snps_ratio = math.sqrt(sum(self.chr_map != self.unique_chr_map[chr_no])/len(self.chr_map))
                 for prs_no in np.where(phen_no)[0]:
                     num = self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy()
-                    denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*num_snps_ratio*test_r2_anc[prs_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
-                    if prs_no == 10:
-                        print(str(prs_no) + " " + str(chr_no) + " " + str(num/denom) + " " + str(num) + " " + str(denom) + " " + str(num_snps_ratio) + " " +str(test_r2_anc[prs_no]) + " " + str(np.std(loco_estimates[chr_no, :, prs_no])))
+                    denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*test_r2_anc[prs_no, chr_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
                     neff[chr_no, prs_no] = num/denom
             
             pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
@@ -826,6 +852,8 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         lr=args.lr,
         device=device,
         validate_every=-1,
+        chr_map = train_dataset.chr,
+        predBetasFlag=args.predBetasFlag
     )
     ##caution!!
     log_dict = {}
@@ -833,11 +861,11 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         log_dict = trainer.train_epoch(epoch)
 
     logging.info("Done search for alpha in: " + str(time.time() - start_time) + " secs")
-
     ## re-evaluate loss and r2 and the end of training
     log_dict = trainer.log_r2_loss(log_dict)
     output_loss = np.zeros((dim_out, len(alpha)))
     output_r2 = np.zeros((dim_out, len(alpha)))
+    output_r2_chr = np.zeros((trainer.num_chr, dim_out, len(alpha)))
     output_neff = np.zeros((dim_out, len(alpha)))
     for prs_no in range(dim_out):
         for model_no, alpha_i in enumerate(alpha):
@@ -850,6 +878,10 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
             output_neff[prs_no, model_no] = log_dict[
                 "neff_pheno_" + str(prs_no) + "_alpha_" + str(alpha_i)
             ]
+            for chr_no, chr in enumerate(trainer.unique_chr_map):
+                output_r2_chr[chr_no, prs_no, model_no] = log_dict[
+                    "test_r2_pheno_" + str(prs_no) + "_alpha_" + str(alpha_i) + "_chr_" + str(chr)
+                ]
 
     logging.info("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
     logging.info("Best MSE across all alpha values: " + str(np.min(output_loss, axis=1)))
@@ -859,7 +891,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     neff_best = np.array([output_neff[i, best_alpha[i]] for i in range(dim_out)])
     np.savetxt(args.out + '.step1.neff', neff_best)
 
-    r2_best = np.array([output_r2[i, best_alpha[i]] for i in range(dim_out)])
+    r2_best = np.array([output_r2_chr[:, i, best_alpha[i]] for i in range(dim_out)])
 
     mu_list = np.zeros((dim_out, len(std_genotype)))
     spike_list = np.zeros((dim_out, len(std_genotype)))

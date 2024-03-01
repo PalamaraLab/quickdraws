@@ -353,13 +353,15 @@ if args.predBetasFlag:
         header=None,
         names=["CHR", "SNP", "GENPOS", "POS", "A1", "A2"],
     )
-    df = pd.merge(df, bim, on=['CHR','SNP','GENPOS','POS'])
+    bim = bim[['CHR','SNP','A1','A2']]
+    df = pd.merge(df, bim, on=['CHR','SNP'])
+    print(df.shape)
     for d, pheno_name in enumerate(pheno_names): 
         df['BETA'] = beta[d]
-        df.to_csv(args.out + '_' + pheno_name + '.blup', sep='\t', index=None, na_rep='NA')
+        df.to_csv(args.out + '_' + pheno_name.decode() + '.blup', sep='\t', index=None, na_rep='NA')
     logging.info("Saved BLUP betas per phenotype as: ")
     for i, pheno_name in enumerate(pheno_names):
-        logging.info(pheno_name.decode() + " : " + str(Path(args.out).resolve()) + "_" + pheno_name + ".blup")
+        logging.info(pheno_name.decode() + " : " + str(Path(args.out).resolve()) + "_" + pheno_name.decode() + ".blup")
     logging.info("")
 
 logging.info("#### Step 1 total Time: " + str(time.time() - overall_st) + " secs ####")
