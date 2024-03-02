@@ -681,19 +681,20 @@ class Trainer:
                         input[:, self.chr_loc[model_no % self.num_chr + 1] :],
                     )
                 )
-                preds, reg_loss = model(
-                    input_loco_chr,
-                    covar_effect_4x[
-                        :, :, self.pheno_for_model[model_no // self.num_chr]
-                    ],
-                    binary=self.args.binary,
-                )
-                mse_loss = self.loss_func(
-                    preds,
-                    label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
-                    h2[:, :, self.pheno_for_model[model_no // self.num_chr]]*(1-var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]])+var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]],
-                )
-                loss = 0.5 * mse_loss + reg_loss
+                with torch.autocast(device_type="cuda"):
+                    preds, reg_loss = model(
+                        input_loco_chr,
+                        covar_effect_4x[
+                            :, :, self.pheno_for_model[model_no // self.num_chr]
+                        ],
+                        binary=self.args.binary,
+                    )
+                    mse_loss = self.loss_func(
+                        preds,
+                        label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
+                        h2[:, :, self.pheno_for_model[model_no // self.num_chr]]*(1-var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]])+var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]],
+                    )
+                    loss = 0.5 * mse_loss + reg_loss
 
                 ## Backprop ##
                 self.optimizer_list[model_no].zero_grad()
