@@ -681,20 +681,19 @@ class Trainer:
                         input[:, self.chr_loc[model_no % self.num_chr + 1] :],
                     )
                 )
-                with torch.autocast(device_type="cuda"):
-                    preds, reg_loss = model(
-                        input_loco_chr,
-                        covar_effect_4x[
-                            :, :, self.pheno_for_model[model_no // self.num_chr]
-                        ],
-                        binary=self.args.binary,
-                    )
-                    mse_loss = self.loss_func(
-                        preds,
-                        label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
-                        h2[:, :, self.pheno_for_model[model_no // self.num_chr]]*(1-var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]])+var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]],
-                    )
-                    loss = 0.5 * mse_loss + reg_loss
+                preds, reg_loss = model(
+                    input_loco_chr,
+                    covar_effect_4x[
+                        :, :, self.pheno_for_model[model_no // self.num_chr]
+                    ],
+                    binary=self.args.binary,
+                )
+                mse_loss = self.loss_func(
+                    preds,
+                    label_4x[:, :, self.pheno_for_model[model_no // self.num_chr]],
+                    h2[:, :, self.pheno_for_model[model_no // self.num_chr]]*(1-var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]])+var_covar_effect[:, :, self.pheno_for_model[model_no // self.num_chr]],
+                )
+                loss = 0.5 * mse_loss + reg_loss
 
                 ## Backprop ##
                 self.optimizer_list[model_no].zero_grad()
@@ -707,6 +706,7 @@ class Trainer:
                 del mse_loss
                 del reg_loss
                 model.zero_grad(set_to_none=True)
+                print(torch.cuda.mem_get_info())
                 # torch.cuda.empty_cache()
 
         if hasattr(self, "scheduler_list"):
@@ -922,6 +922,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     del model_list
     
     if device == 'cuda':
+    torch._dynamo.reset()
         with torch.no_grad():
             torch.cuda.empty_cache()
         gc.collect()
