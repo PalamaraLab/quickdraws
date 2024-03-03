@@ -27,7 +27,7 @@ import gc
 import pdb
 import logging
 logger = logging.getLogger(__name__)
-torch._dynamo.config.cache_size_limit = 32
+# torch._dynamo.config.cache_size_limit = 32
 
 if torch.cuda.is_available():
     import bitsandbytes as bnb
@@ -432,10 +432,9 @@ class Trainer:
                     spike = torch.clamp(model.sc1.spike1, 1e-6, 1.0 - 1e-6)
                     mu = model.fc1.weight
                     beta = spike.mul(mu)
+                    beta = beta.T
                     for chr_no, chr in enumerate(self.unique_chr_map):
-                        input_c = input[:, self.chr_map != chr]
-                        beta_c = beta[:, self.chr_map != chr]
-                        preds_c = input_c@(beta_c.T)
+                        preds_c = input[:, self.chr_map != chr]@(beta[self.chr_map != chr])
                         preds_c += covar_effect
                         if self.args.binary:
                             preds_c = torch.sigmoid(preds_c)
@@ -445,8 +444,6 @@ class Trainer:
                     label[torch.isnan(label)] = preds[torch.isnan(label)]
                     preds_arr[model_no].extend(preds.cpu().numpy().tolist())
                     labels_arr[model_no].extend(label.cpu().numpy().tolist())
-                
-
 
             test_loss = []
             for model_no in range(len(self.model_list)):
@@ -793,7 +790,7 @@ def initialize_model(
                     else None,
                 )
                 model = model.to(device)
-                model = torch.compile(model)
+                # model = torch.compile(model)
                 model_list.append(model)
         else:
             model = Model(
@@ -807,7 +804,7 @@ def initialize_model(
                 spike=spike,
             )
             model = model.to(device)
-            model = torch.compile(model)
+            # model = torch.compile(model)
             model_list.append(model)
     return model_list
 
@@ -922,7 +919,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     del model_list
     
     if device == 'cuda':
-    torch._dynamo.reset()
+    # torch._dynamo.reset()
         with torch.no_grad():
             torch.cuda.empty_cache()
         gc.collect()
