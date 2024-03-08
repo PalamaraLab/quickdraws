@@ -951,7 +951,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     del model_list
     
     if device == 'cuda':
-    torch._dynamo.reset()
+        torch._dynamo.reset()
         with torch.no_grad():
             torch.cuda.empty_cache()
         gc.collect()
