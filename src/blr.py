@@ -391,9 +391,9 @@ class Trainer:
             test_dataset,
             shuffle=False,
             batch_size=self.args.batch_size,
-            num_workers=self.args.num_workers,
-            pin_memory=self.args.num_workers > 0,
-        )
+            num_workers=0,
+            pin_memory=0 > 0,
+        ) ## caution
         self.pheno_names = train_dataset.pheno_names
 
     ## masked BCE loss function
