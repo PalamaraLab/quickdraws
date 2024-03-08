@@ -27,7 +27,7 @@ import gc
 import pdb
 import logging
 logger = logging.getLogger(__name__)
-# torch._dynamo.config.cache_size_limit = 32
+torch._dynamo.config.cache_size_limit = 32
 
 if torch.cuda.is_available():
     import bitsandbytes as bnb
@@ -344,13 +344,13 @@ class Trainer:
             if device == 'cuda':
                 ### caution !!!
                 self.optimizer_list.append(
-                    bnb.optim.Adam(
+                    bnb.optim.PagedAdam8bit(
                         model.parameters(),
                         lr=lr[model_no],
                         eps=adam_eps,
                         weight_decay=weight_decay,
                         betas=(0.9, 0.995),
-                        optim_bits=8,
+                        # optim_bits=8,
                     )
                 )
             else:
@@ -818,7 +818,7 @@ def initialize_model(
                     else None,
                 )
                 model = model.to(device)
-                # model = torch.compile(model)
+                model = torch.compile(model)
                 model_list.append(model)
         else:
             model = Model(
@@ -832,7 +832,7 @@ def initialize_model(
                 spike=spike,
             )
             model = model.to(device)
-            # model = torch.compile(model)
+            model = torch.compile(model)
             model_list.append(model)
     return model_list
 
@@ -951,7 +951,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     del model_list
     
     if device == 'cuda':
-    # torch._dynamo.reset()
+    torch._dynamo.reset()
         with torch.no_grad():
             torch.cuda.empty_cache()
         gc.collect()
