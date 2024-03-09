@@ -27,7 +27,7 @@ import gc
 import pdb
 import logging
 logger = logging.getLogger(__name__)
-torch._dynamo.config.cache_size_limit = 64
+# torch._dynamo.config.cache_size_limit = 32
 
 if torch.cuda.is_available():
     import bitsandbytes as bnb
@@ -344,13 +344,13 @@ class Trainer:
             if device == 'cuda':
                 ### caution !!!
                 self.optimizer_list.append(
-                    bnb.optim.PagedAdam8bit(
+                    bnb.optim.Adam(
                         model.parameters(),
                         lr=lr[model_no],
                         eps=adam_eps,
                         weight_decay=weight_decay,
                         betas=(0.9, 0.995),
-                        # optim_bits=8,
+                        optim_bits=8,
                     )
                 )
             else:
@@ -391,9 +391,9 @@ class Trainer:
             test_dataset,
             shuffle=False,
             batch_size=self.args.batch_size,
-            num_workers=0,
-            pin_memory=0 > 0,
-        ) ## caution
+            num_workers=self.args.num_workers,
+            pin_memory=self.args.num_workers > 0,
+        )
         self.pheno_names = train_dataset.pheno_names
 
     ## masked BCE loss function
@@ -589,7 +589,6 @@ class Trainer:
     def train_epoch(self, epoch):
         logging.info("Epoch: " + str(epoch+1) + "/" + str(self.args.alpha_search_epochs))
         for input, covar_effect, label in self.train_dataloader:
-            st = time.time()
             log_dict = {}
             input, covar_effect, label = (
                 input.to(self.device),
@@ -686,7 +685,7 @@ class Trainer:
     def train_epoch_loco(self, epoch):
         logging.info("Epoch: " + str(epoch+1) + "/" + str(self.args.num_epochs))
         for input, covar_effect, label in self.train_dataloader:
-            st = time.time()
+            # st = time.time()
             input, covar_effect, label = (
                 input.to(self.device),
                 covar_effect.to(self.device),
@@ -732,7 +731,7 @@ class Trainer:
                 model.zero_grad(set_to_none=True)
                 # torch.cuda.empty_cache()
             
-            print(time.time() - st)
+            # print(time.time() - st)
 
         if hasattr(self, "scheduler_list"):
             for scheduler in self.scheduler_list:
@@ -818,7 +817,7 @@ def initialize_model(
                     else None,
                 )
                 model = model.to(device)
-                model = torch.compile(model)
+                # model = torch.compile(model)
                 model_list.append(model)
         else:
             model = Model(
@@ -832,7 +831,7 @@ def initialize_model(
                 spike=spike,
             )
             model = model.to(device)
-            model = torch.compile(model)
+            # model = torch.compile(model)
             model_list.append(model)
     return model_list
 
@@ -883,10 +882,13 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     )
     ##caution!!
     log_dict = {}
+    st1 = time.time()
     for epoch in tqdm(range(args.alpha_search_epochs)):
         log_dict = trainer.train_epoch(epoch)
+    te1 = (time.time() - st1)*(90 - args.alpha_search_epochs)/args.alpha_search_epochs
+    print("time added for extrapolation = " + str(te1))
 
-    logging.info("Done search for alpha in: " + str(time.time() - start_time) + " secs")
+    
     ## re-evaluate loss and r2 and the end of training
     log_dict = trainer.log_r2_loss(log_dict)
     output_loss = np.zeros((dim_out, len(alpha)))
@@ -951,7 +953,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     del model_list
     
     if device == 'cuda':
-        torch._dynamo.reset()
+    # torch._dynamo.reset()
         with torch.no_grad():
             torch.cuda.empty_cache()
         gc.collect()
@@ -962,6 +964,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         train_dataset.close_hdf5()
         test_dataset.close_hdf5()
 
+    logging.info("Done search for alpha in: " + str(time.time() + te1 - start_time) + " secs")
     return -output_loss, mu_list, spike_list, r2_best
 
 
@@ -1137,12 +1140,16 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         pheno_for_model=pheno_for_model,
         predBetasFlag=args.predBetasFlag
     )
+    
+    st1 = time.time()
     for epoch in tqdm(range(args.num_epochs)):
         _ = trainer.train_epoch_loco(epoch)
+    te1 = (time.time() - st1)*(30 - args.num_epochs)/args.num_epochs
+    print("time added for extrapolation = " + str(te1))
 
     ## Calculate estimates
 
-    logging.info("Done fitting the model in: " + str(time.time() - start_time) + " secs")
+    logging.info("Done fitting the model in: " + str(time.time() + te1 - start_time) + " secs")
 
     logging.info("Saving exact LOCO estimates...")
     start_time = time.time()
