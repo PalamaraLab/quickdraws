@@ -76,7 +76,7 @@ def convert_to_hdf5(
     out="out",
     snps_to_keep_filename=None,
     master_hdf5=None,
-    chunk_size=512,
+    chunk_size=4096,
 ):
     num_threads = len(os.sched_getaffinity(0))
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
@@ -126,7 +126,7 @@ def convert_to_hdf5(
     logging.info("Estimating variance per allele...")
 
     covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
-        bed, sample_indices, covars, snp_mask, chunk_size=chunk_size, num_threads=num_threads
+        bed, sample_indices, covars, snp_mask, chunk_size=512, num_threads=num_threads
     )
     _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
     total_snps = int(sum(snp_mask))
@@ -164,6 +164,7 @@ def convert_to_hdf5(
 
     logging.info("Saving the genotype to HDF5 file...")
     for i in tqdm(range(0, total_samples, chunk_size)):
+        st = time.time()
         if master_hdf5 is None:
             x = 2 - (
                 snp_on_disk[
@@ -187,6 +188,7 @@ def convert_to_hdf5(
                 pos = sample_order[i : min(i + chunk_size, total_samples)][index]
                 dset1[i + index] = master_hdf5['hap1'][pos]
                 dset2[i + index] = master_hdf5['hap2'][pos]
+        print("Number of samples: {0}/{1}".format(i+chunk_size, total_samples) + " in " + str(time.time() - st) + " secs") 
 
     h1.close()
     logging.info("Done saving the genotypes to hdf5 file " + str(out + '.hdf5'))
