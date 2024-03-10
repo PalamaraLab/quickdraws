@@ -118,7 +118,8 @@ def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_
 
     bim = pd.read_csv(bed + ".bim", header=None, sep="\s+")
     bim = bim.rename(columns={0:'CHR',1:'SNP'})
-    df = pd.merge(bim, df, on=['CHR','SNP'], how='left')
+    dtype = dict(CHR=str, SNP=str)
+    df = pd.merge(bim.astype(dtype), df.astype(dtype), on=['CHR','SNP'], how='left')
 
     logging.info("Number of SNPs with MAF/LD information = " + str(len(df) - df['MAF'].isna().sum()))
     is_missing = int(df['MAF'].isna().any())
@@ -145,17 +146,18 @@ def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_
     i = 0
     for j in range(n_maf_bins):
         maf_idx = (mafs > maf_bins[j]) & (mafs <= maf_bins[j+1])
-        tru_ld_quantiles = [
-            np.quantile(ld_scores[maf_idx], i) for i in ld_score_percentiles
-        ]
-        for k in range(n_ld_bins):
-            ld_idx = (ld_scores > tru_ld_quantiles[k]) & (
-                ld_scores <= tru_ld_quantiles[k+1]
-            )
-            cat_idx = np.where(maf_idx & ld_idx)[0]
-            # Set the category to one
-            tot_cats[cat_idx, i] = 1
-            i += 1
+        if np.sum(maf_idx) > 0:
+            tru_ld_quantiles = [
+                np.quantile(ld_scores[maf_idx], i) for i in ld_score_percentiles
+            ]
+            for k in range(n_ld_bins):
+                ld_idx = (ld_scores > tru_ld_quantiles[k]) & (
+                    ld_scores <= tru_ld_quantiles[k+1]
+                )
+                cat_idx = np.where(maf_idx & ld_idx)[0]
+                # Set the category to one
+                tot_cats[cat_idx, i] = 1
+                i += 1
 
     if is_missing > 0:
         cat_idx = np.where(np.isnan(mafs))[0]
