@@ -33,7 +33,7 @@ def get_xtx(x, covars, K):
     return geno_covar_effect, xtx
 
 ## get covariate effect on genotypes and std_genotype
-def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=4096, num_threads=1):
+def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size, num_threads=1):
     snp_on_disk = Bed(bed, count_A1=True)
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
     chunk_size = min(chunk_size, snp_on_disk.shape[1])
@@ -76,7 +76,7 @@ def convert_to_hdf5(
     out="out",
     snps_to_keep_filename=None,
     master_hdf5=None,
-    chunk_size=4096,
+    chunk_size=512,
 ):
     num_threads = len(os.sched_getaffinity(0))
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
@@ -126,7 +126,7 @@ def convert_to_hdf5(
     logging.info("Estimating variance per allele...")
 
     covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
-        bed, sample_indices, covars, snp_mask, chunk_size=4096, num_threads=num_threads
+        bed, sample_indices, covars, snp_mask, chunk_size=chunk_size, num_threads=num_threads
     )
     _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
     total_snps = int(sum(snp_mask))
