@@ -77,7 +77,7 @@ def convert_to_hdf5(
     out="out",
     snps_to_keep_filename=None,
     master_hdf5=None,
-    chunk_size=4096,
+    chunk_size=1024,
 ):
     num_threads = len(os.sched_getaffinity(0))
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
