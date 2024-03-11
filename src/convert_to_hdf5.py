@@ -163,26 +163,23 @@ def convert_to_hdf5(
         "iid", data=np.array(snp_on_disk.iid[sample_indices], dtype=int), dtype="int"
     )
 
+    snp_on_disk = snp_on_disk[sample_indices, snp_mask]
     logging.info("Saving the genotype to HDF5 file...")
     for i in range(0, total_samples, chunk_size):
         st = time.time()
         if master_hdf5 is None:
             x = 2 - (
-                snp_on_disk[
-                    sample_indices[i : min(i + chunk_size, total_samples)], snp_mask
-                ]
-                .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
+                snp_on_disk[i : min(i + chunk_size, total_samples), :]
+                .read(dtype="float64", num_threads=num_threads)
                 .val
             )
-            x = np.array(x, dtype="float32")
-            x[x < 0] = np.nan
             x = np.where(
                 np.isnan(x),
                 np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
                 x,
             )
-            dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
-            dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
+            dset1[i : i + x.shape[0]] = np.packbits(x > 0, axis=1)
+            dset2[i : i + x.shape[0]] = np.packbits(x > 1, axis=1)
             ## np.packbits() requires most time (~ 80%)
         else:
             for index in np.argsort(sample_order[i : min(i + chunk_size, total_samples)]):
