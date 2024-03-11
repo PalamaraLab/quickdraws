@@ -10,6 +10,7 @@ from pysnptools.distreader import Bgen
 import pdb
 import numba
 import os
+import time
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import logging
