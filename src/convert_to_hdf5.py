@@ -56,7 +56,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size, num
 
     geno_covar_effect = np.zeros((covars.shape[1], snp_on_disk.shape[1]))
     xtx = np.zeros(snp_on_disk.shape[1])
-    for i in tqdm(range(0, snp_on_disk.shape[1], chunk_size)):
+    for i in range(0, snp_on_disk.shape[1], chunk_size):
         x = 2 - (
             snp_on_disk[:, i : min(i + chunk_size, snp_on_disk.shape[1])]
             .read(dtype="float64", num_threads=num_threads)
@@ -164,7 +164,7 @@ def convert_to_hdf5(
     )
 
     logging.info("Saving the genotype to HDF5 file...")
-    for i in tqdm(range(0, total_samples, chunk_size)):
+    for i in range(0, total_samples, chunk_size):
         st = time.time()
         if master_hdf5 is None:
             x = 2 - (
@@ -246,7 +246,7 @@ def make_master_hdf5(
         dtype=np.uint8,
     )
     logging.info("Saving the genotype to HDF5 file...")
-    for i in tqdm(range(0, total_samples, chunk_size)):
+    for i in range(0, total_samples, chunk_size):
         x = 2 - (
             snp_on_disk[
                 i : min(i + chunk_size, total_samples), snp_mask
