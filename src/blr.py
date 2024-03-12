@@ -960,10 +960,6 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         with torch.no_grad():
             torch.cuda.empty_cache()
 
-    if args.lowmem:
-        train_dataset.close_hdf5()
-        test_dataset.close_hdf5()
-
     logging.info("Done search for alpha in: " + str(time.time() + te1 - start_time) + " secs")
     return -output_loss, mu_list, spike_list, r2_best
 
@@ -1033,6 +1029,10 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         output_r2, mu, spike, r2_best = hyperparam_search(
             args, alpha, h2, train_dataset, test_dataset, device=device
         )
+
+    if args.lowmem:
+        train_dataset.close_hdf5()
+        test_dataset.close_hdf5()
 
     np.savetxt(args.out + ".alpha", np.array(alpha)[np.argmax(output_r2, axis=1)])
     if args.h2_grid:
