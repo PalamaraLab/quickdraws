@@ -17,6 +17,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 @numba.jit(nopython=True)
+def remove_nan(x):
+    for snp in numba.prange(x.shape[1]):
+        isnan_at_snp = np.isnan(x[:, snp])
+        ### caution: ideally should do a coin flip, or store as float
+        freq = int(np.median(x[:, snp][~isnan_at_snp]))
+        x[:, snp][isnan_at_snp] = freq
+    return x
+
+@numba.jit(nopython=True)
 def get_xtx(x, covars, K):
     for snp in numba.prange(x.shape[1]):
         isnan_at_snp = np.isnan(x[:, snp])
@@ -126,9 +135,12 @@ def convert_to_hdf5(
 
     logging.info("Estimating variance per allele...")
 
-    covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
-        bed, sample_indices, covars, snp_mask, chunk_size=512, num_threads=num_threads
-    )
+    # covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
+    #     bed, sample_indices, covars, snp_mask, chunk_size=512, num_threads=num_threads
+    # )
+    covars_arr, geno_covar_effect, std_genotype = np.random.rand(100), np.random.rand(100), np.random.rand(100)
+    #### CAUTION!!!
+
     _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
     total_snps = int(sum(snp_mask))
 
@@ -168,18 +180,20 @@ def convert_to_hdf5(
     for i in range(0, total_samples, chunk_size):
         st = time.time()
         if master_hdf5 is None:
+            st1 = time.time()
             x = 2 - (
                 snp_on_disk[i : min(i + chunk_size, total_samples), :]
                 .read(dtype="float64", num_threads=num_threads)
                 .val
             )
-            x = np.where(
-                np.isnan(x),
-                np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
-                x,
-            )
+            print("1: " + str(time.time() - st1))
+            st1 = time.time()
+            x = remove_nan(x)
+            print("2: " + str(time.time() - st1))
+            st1 = time.time()
             dset1[i : i + x.shape[0]] = np.packbits(x > 0, axis=1)
             dset2[i : i + x.shape[0]] = np.packbits(x > 1, axis=1)
+            print("3: " + str(time.time() - st1))
             ## np.packbits() requires most time (~ 80%)
         else:
             for index in np.argsort(sample_order[i : min(i + chunk_size, total_samples)]):
