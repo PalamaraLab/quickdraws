@@ -238,7 +238,7 @@ else:
     logging.info("#### Step 1a. Preprocessing the phenotypes and converting bed to hdf5 ####")
     rhe_out = args.out
     Traits, covar_effects, sample_indices = preprocess_phenotypes(
-        args.phenoFile, args.covarFile, args.bed, args.keepFile, args.binary, args.phen_thres
+        args.phenoFile, args.covarFile, args.bed, args.keepFile, args.binary, args.hdf5, args.phen_thres
     )
     PreparePhenoRHE(Traits, covar_effects, args.bed, rhe_out, None)
     hdf5_filename = convert_to_hdf5(
