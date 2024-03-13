@@ -164,6 +164,7 @@ def convert_to_hdf5(
 
     logging.info("Saving the genotype to HDF5 file...")
     for i in range(0, total_samples, chunk_size):
+        logging.info(str(i))
         if master_hdf5 is None:
             x = 2 - (
                 snp_on_disk[
@@ -244,6 +245,7 @@ def make_master_hdf5(
     )
     logging.info("Saving the genotype to HDF5 file...")
     for i in range(0, total_samples, chunk_size):
+        logging.info(str(i))
         x = 2 - (
             snp_on_disk[
                 i : min(i + chunk_size, total_samples), snp_mask
