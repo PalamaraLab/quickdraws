@@ -10,20 +10,10 @@ from pysnptools.distreader import Bgen
 import pdb
 import numba
 import os
-import time
 
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import logging
 logger = logging.getLogger(__name__)
-
-@numba.jit(nopython=True)
-def remove_nan(x):
-    for snp in numba.prange(x.shape[1]):
-        isnan_at_snp = np.isnan(x[:, snp])
-        ### caution: ideally should do a coin flip, or store as float
-        freq = int(np.median(x[:, snp][~isnan_at_snp]))
-        x[:, snp][isnan_at_snp] = freq
-    return x
 
 @numba.jit(nopython=True)
 def get_xtx(x, covars, K):
@@ -43,7 +33,7 @@ def get_xtx(x, covars, K):
     return geno_covar_effect, xtx
 
 ## get covariate effect on genotypes and std_genotype
-def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size, num_threads=1):
+def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=512, num_threads=1):
     snp_on_disk = Bed(bed, count_A1=True)
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
     chunk_size = min(chunk_size, snp_on_disk.shape[1])
@@ -86,7 +76,7 @@ def convert_to_hdf5(
     out="out",
     snps_to_keep_filename=None,
     master_hdf5=None,
-    chunk_size=1024,
+    chunk_size=4096,
 ):
     num_threads = len(os.sched_getaffinity(0))
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
@@ -135,12 +125,9 @@ def convert_to_hdf5(
 
     logging.info("Estimating variance per allele...")
 
-    # covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
-    #     bed, sample_indices, covars, snp_mask, chunk_size=512, num_threads=num_threads
-    # )
-    covars_arr, geno_covar_effect, std_genotype = np.random.rand(100), np.random.rand(100), np.random.rand(100)
-    #### CAUTION!!!
-
+    covars_arr, geno_covar_effect, std_genotype = get_geno_covar_effect(
+        bed, sample_indices, covars, snp_mask, chunk_size=512, num_threads=num_threads
+    )
     _ = h1.create_dataset("chr", data=snp_on_disk.pos[:, 0][snp_mask], dtype=np.int8)
     total_snps = int(sum(snp_mask))
 
@@ -175,32 +162,31 @@ def convert_to_hdf5(
         "iid", data=np.array(snp_on_disk.iid[sample_indices], dtype=int), dtype="int"
     )
 
-    snp_on_disk = snp_on_disk[sample_indices, snp_mask]
     logging.info("Saving the genotype to HDF5 file...")
     for i in range(0, total_samples, chunk_size):
-        st = time.time()
         if master_hdf5 is None:
-            st1 = time.time()
             x = 2 - (
-                snp_on_disk[i : min(i + chunk_size, total_samples), :]
-                .read(dtype="float64", num_threads=num_threads)
+                snp_on_disk[
+                    sample_indices[i : min(i + chunk_size, total_samples)], snp_mask
+                ]
+                .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
                 .val
             )
-            print("1: " + str(time.time() - st1))
-            st1 = time.time()
-            x = remove_nan(x)
-            print("2: " + str(time.time() - st1))
-            st1 = time.time()
-            dset1[i : i + x.shape[0]] = np.packbits(x > 0, axis=1)
-            dset2[i : i + x.shape[0]] = np.packbits(x > 1, axis=1)
-            print("3: " + str(time.time() - st1))
+            x = np.array(x, dtype="float32")
+            x[x < 0] = np.nan
+            x = np.where(
+                np.isnan(x),
+                np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
+                x,
+            )
+            dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
+            dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
             ## np.packbits() requires most time (~ 80%)
         else:
             for index in np.argsort(sample_order[i : min(i + chunk_size, total_samples)]):
                 pos = sample_order[i : min(i + chunk_size, total_samples)][index]
                 dset1[i + index] = master_hdf5['hap1'][pos]
                 dset2[i + index] = master_hdf5['hap2'][pos]
-        print("Number of samples: {0}/{1}".format(i+chunk_size, total_samples) + " in " + str(time.time() - st) + " secs") 
 
     h1.close()
     logging.info("Done saving the genotypes to hdf5 file " + str(out + '.hdf5'))

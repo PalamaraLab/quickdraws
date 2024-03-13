@@ -12,9 +12,16 @@ import pdb
 from scipy.special import expit
 from sklearn.preprocessing import quantile_transform
 import logging
+import h5py 
+
 logger = logging.getLogger(__name__)
 
-def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 0.0, log=True):
+def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, hdf5=None, phen_thres = 0.0, log=True):
+    if hdf5 is not None:
+        h5_file = h5py.File(hdf5, 'r')
+        hdf5_fid_iid = pd.DataFrame(h5_file['iid'][:].astype(str), columns=['FID','IID'])
+        h5_file.close()
+
     snp_on_disk = Bed(bed, count_A1=True)
     samples_geno = [int(x) for x in snp_on_disk.iid[:, 0]]
 
@@ -25,7 +32,20 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, phen_thres = 0.0,
 
     # Phenotype loading and alignment
     Traits = pd.read_csv(pheno, sep="\s+", low_memory=False)
-    Traits = Traits.sample(frac=1)  ## shuffle the pheno file
+    
+    if hdf5 is not None:
+        ### If HDF5 present and has all samples then keep the order in HDF5
+        dtypes = Traits.dtypes[['FID','IID']]
+        mdf_with_hdf5 = pd.merge(hdf5_fid_iid.astype(dtypes), Traits, on=['FID','IID'])
+        if len(mdf_with_hdf5) < len(Traits):
+            logging.warning('the HDF5 file supplied doesnt have all the samples, only {0}/{1} - using the remaining'.format(len(mdf_with_hdf5), len(Traits)))
+            Traits = mdf_with_hdf5.copy()
+        elif len(mdf_with_hdf5) == len(Traits):
+            logging.info('the HDF5 file supplied has all the samples, using order in HDF5 file')
+            Traits = mdf_with_hdf5.copy()
+    else:
+        Traits = Traits.sample(frac=1)  ## shuffle the pheno file
+
     Traits = Traits.set_index(Traits["FID"])
     Traits = Traits.dropna(subset=[Traits.columns[0]])
     N_phen = Traits.shape[1] - 2  # exclude FID, IID
