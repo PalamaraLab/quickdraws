@@ -64,8 +64,14 @@ def preprocess_offsets(offsets, sample_file=None, weights=None, is_loco_file=Fal
 
 def adjust_test_stats(out, pheno, correction):
     sumstats_cur = pd.read_hdf("{0}.{1}.sumstats".format(out, pheno), key="sumstats")
-    for chr in np.unique(sumstats_cur['CHR']):
-        sumstats_cur["CHISQ"] *= float(correction[str(chr)])
+    if 'Firth' in sumstats_cur.columns:
+        for chr in np.unique(sumstats_cur['CHR']):
+            for is_firth in [True, False]:
+                sumstats_cur.loc[(sumstats_cur.CHR == chr) & (sumstats_cur.Firth == is_firth), "CHISQ"] *= float(correction[str((chr, is_firth))])
+    else:
+        for chr in np.unique(sumstats_cur['CHR']):
+            sumstats_cur.loc[sumstats_cur.CHR == chr, "CHISQ"] *= float(correction[str(chr)])
+
     sumstats_cur["P"] = chi2.sf(sumstats_cur.CHISQ, df=1)
     sumstats_cur["CHISQ"] = sumstats_cur["CHISQ"].map(lambda x: "{:.8f}".format(x))
     sumstats_cur["P"] = sumstats_cur["P"].map(lambda x: "{:.2E}".format(x))
@@ -119,14 +125,22 @@ def calibrate_test_stats(
     assert (sumstats_ref[['CHR','SNP','POS']].values == sumstats_cur[['CHR','SNP','POS']].values).all()
 
     overall_correction_dict = {}
-    for chr in np.unique(sumstats_ref['CHR']):
-        ess = sumstats_cur.loc[sumstats_ref.CHR == chr,"OBS_CT"].values*float(neff[str(chr)])/sumstats_ref.loc[sumstats_ref.CHR == chr,"OBS_CT"].values
-        # overall_correction = (ess * max(np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ) - 1, 0) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)
-        overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)
-        if pheno == 'fake10':
-            print(str(np.mean(overall_correction)) + " " + str(chr) + " " + str(np.mean(ess)) + " " + str(np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)))
-        overall_correction_dict[chr] = np.mean(overall_correction)
-        sumstats_cur.loc[sumstats_ref.CHR == chr, "CHISQ"] *= overall_correction
+    if 'Firth' in sumstats_cur.columns:
+        for chr in np.unique(sumstats_ref['CHR']):
+            for is_firth in [True, False]:
+                ess = sumstats_cur.loc[(sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth),"OBS_CT"].values*float(neff[str(chr)])/sumstats_ref.loc[(sumstats_ref.CHR == chr)  & (sumstats_cur.Firth == is_firth),"OBS_CT"].values
+                overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth)].CHISQ)
+                if pheno == 'fake10':
+                    print(str(np.mean(overall_correction)) + " " + str(chr) + " " + str(is_firth) + " " + str(np.mean(ess)))
+                overall_correction_dict[(chr, is_firth)] = np.mean(overall_correction)
+                sumstats_cur.loc[(sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth), "CHISQ"] *= overall_correction
+
+    else:
+        for chr in np.unique(sumstats_ref['CHR']):
+            ess = sumstats_cur.loc[sumstats_ref.CHR == chr,"OBS_CT"].values*float(neff[str(chr)])/sumstats_ref.loc[sumstats_ref.CHR == chr,"OBS_CT"].values
+            overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)
+            overall_correction_dict[chr] = np.mean(overall_correction)
+            sumstats_cur.loc[sumstats_ref.CHR == chr, "CHISQ"] *= overall_correction
 
     # ess = sumstats_cur["OBS_CT"].values*float(neff)/sumstats_ref["OBS_CT"].values
     # overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99)].CHISQ)

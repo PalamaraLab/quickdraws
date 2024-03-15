@@ -31,7 +31,7 @@ def preprocess_covars(covarFile, iid_fid):
     covars = np.array(covars.values, dtype="float32")
     return covars
 
-def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, out):
+def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, firth_arr, out):
     bim = pd.read_csv(
         bedFile + ".bim",
         sep="\s+",
@@ -47,6 +47,8 @@ def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, o
         bim["SE"] = se[pheno_no]
         bim["CHISQ"] = chisq[pheno_no]
         bim["P"] = pval[pheno_no]
+        if firth_arr is not None:
+            bim["Firth"] = firth_arr[pheno_no]
         bim.to_hdf(
             "{0}.{1}.sumstats".format(out, pheno),
             key="sumstats",
@@ -55,7 +57,7 @@ def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, o
         )
 
 def write_sumstats_file_bgen(
-    snp_on_disk, bgenfile, pheno_names, num_samples, afreq, beta, chisq, out
+    snp_on_disk, bgenfile, pheno_names, num_samples, afreq, beta, chisq, firth_arr, out
 ):
     bim = pd.DataFrame()
     bim["CHR"] = np.array(snp_on_disk.pos[:, 0], dtype="int")
@@ -90,6 +92,8 @@ def write_sumstats_file_bgen(
         bim["SE"] = se[pheno_no]
         bim["CHISQ"] = chisq[pheno_no]
         bim["P"] = pval[pheno_no]
+        if firth_arr is not None:
+            bim["Firth"] = firth_arr[pheno_no]
         bim.to_hdf(
             "{0}.{1}.sumstats".format(out, pheno),
             key="sumstats",
@@ -210,6 +214,7 @@ def firth_parallel(
 ):
     chisq_out = chisq_snp.copy()
     beta_out = beta_snp.copy()
+    firth_out = np.zeros_like(chisq_out, dtype='bool')
     is_rare_snp = (freq_snp < firth_maf_thresh) | (freq_snp > (1 - firth_maf_thresh)) ##caution
     is_rare_pheno = ((np.nanmean(Y, axis=0) < firth_prevalence_thresh) | (np.nanmean(Y, axis=0) > (1 - firth_prevalence_thresh)))
     pheno_mask = ((chi2.sf(chisq_snp, df=1) < firth_pval_thresh) & (is_rare_pheno | is_rare_snp))
@@ -218,7 +223,8 @@ def firth_parallel(
     )
     chisq_out[pheno_mask] = 2 * loglike_diff
     beta_out[pheno_mask] = beta_firth
-    return chisq_out, beta_out
+    firth_out[pheno_mask] = True
+    return chisq_out, beta_out, firth_out
 
 def firth_null_parallel(offset, Y, covar_effects, covars, out):
     offset_columns = offset.columns.tolist()
@@ -231,6 +237,8 @@ def firth_null_parallel(offset, Y, covar_effects, covars, out):
     dfc.to_csv(
         out + ".firth_null", sep="\t", index=None
     )
+    # pred_covars = pd.read_csv(out + ".firth_null", sep="\t")
+    # pred_covars = pred_covars[pred_covars.columns[2:]].values
     return pred_covars
 
 def get_unadjusted_test_statistics(
@@ -273,6 +281,7 @@ def get_unadjusted_test_statistics(
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0])
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
+    firth_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="bool")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
     num_samples_arr = np.zeros(len(chr_map), dtype="float32")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
@@ -355,6 +364,9 @@ def get_unadjusted_test_statistics(
                 beta_arr[
                     :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
                 ] = par_out[:, 1].T
+                firth_arr[
+                    :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
+                ] = par_out[:, 2].T
 
         prev += num_snps_in_chr
 
@@ -365,6 +377,7 @@ def get_unadjusted_test_statistics(
         afreq_arr,
         beta_arr,
         chisq_arr,
+        firth_arr if binary else None,
         out,
     )
 
@@ -443,6 +456,7 @@ def get_unadjusted_test_statistics_bgen(
     batch_size = int(max_memory * 1024 * 1024 / 8 / snp_on_disk.shape[0])
     beta_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
     chisq_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="float32")
+    firth_arr = np.zeros((pheno.shape[1] - 2, len(chr_map)), dtype="bool")
     afreq_arr = np.zeros(len(chr_map), dtype="float32")
     num_samples_arr = np.zeros(len(chr_map), dtype="float32")
     Y = pheno[pheno.columns[2:]].values.astype("float32")
@@ -537,6 +551,9 @@ def get_unadjusted_test_statistics_bgen(
                 beta_arr[
                     :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
                 ] = par_out[:, 1].T
+                firth_arr[
+                    :, prev + batch : prev + min(batch + batch_size, num_snps_in_chr)
+                ] = par_out[:, 2].T
 
         prev += num_snps_in_chr
 
@@ -548,6 +565,7 @@ def get_unadjusted_test_statistics_bgen(
         afreq_arr,
         beta_arr,
         chisq_arr,
+        firth_arr if binary else None,
         out,
     )
 
