@@ -246,6 +246,8 @@ def get_test_statistics(
     if calibrate:
         logging.info("Preprocessing traits for unrelated homogenous samples...")
         unrel_sample_traits, unrel_sample_covareffect, unrel_sample_indices = preprocess_phenotypes(phenofile, covar, bedfile, unrel_homo_file, binary, log=False)
+        unrel_sample_traits = unrel_sample_traits[pheno_columns]
+        unrel_sample_covareffect = unrel_sample_covareffect[['FID','IID'] + ["covar_effect_" + str(col) for col in pheno_columns[2:]]]
         unrel_sample_indices = unrel_sample_indices.tolist()
 
         if weights is not None:
