@@ -259,6 +259,7 @@ def runRHE(
     out="out",
     binary=False,
     random_vectors=50,
+    jn=10
 ):
     """
     A wrapper that prepares a file with SNP annotations (if needed), runs RHE on the background,
@@ -315,7 +316,7 @@ def runRHE(
             covariates_df = pd.merge(covariates_df, pheno_df)[covar_df_cols]
             covariates_df.to_csv(out + ".rhe.covars", sep="\t", index=None, na_rep="NA")
             cmd += " -c " + out + ".rhe.covars"
-        cmd += " -k " + str(random_vectors) + " -jn 10 > " + savelog
+        cmd += " -k " + str(random_vectors) + " -jn " + str(jn) + " > " + savelog
         logging.info("Invoking RHE as: " + str(cmd))
         _ = subprocess.run(cmd, shell=True)
 

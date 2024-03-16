@@ -165,6 +165,12 @@ parser.add_argument(
     default=50
 )
 parser.add_argument(
+    "--rhe_jn",
+    help="Number of jack-knife partitions in RHE MC",
+    type=int,
+    default=10
+)
+parser.add_argument(
     "--phen_thres",
     help="The phenotyping rate threshold below which the phenotype isn't used to perform GWAS",
     type=float,
@@ -276,6 +282,7 @@ if args.h2_file is None and not args.h2_grid:
         args.out,
         args.binary,
         args.rhe_random_vectors,
+        args.rhe_jn
     )
     logging.info("#### Step 1b. Done in " + str(time.time() - st) + " secs ####")
     logging.info("")
