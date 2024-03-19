@@ -5,8 +5,8 @@
 conda create -n qd python=3.9 -y
 conda activate qd
 cd quickdraws/
-conda install -c conda-forge cudatoolkit -y
-python3.9 -m pip install -r requirements.txt 
+pip install torch==2.2.1 --index-url https://download.pytorch.org/whl/cu118
+python3.9 -m pip install -r requirements.txt
 chmod +x src/RHEmcmt 
 ```
 
