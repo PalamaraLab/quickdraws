@@ -80,6 +80,7 @@ def adjust_test_stats(out, pheno, correction):
         "{0}.{1}.sumstats".format(out, pheno),
         sep="\t",
         index=None,
+        na_rep='NA'
     )
 
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
@@ -153,6 +154,7 @@ def calibrate_test_stats(
         "{0}.{1}.sumstats".format(out, pheno),
         sep="\t",
         index=None,
+        na_rep='NA'
     )
 
     os.system("gzip -f " + "{0}.{1}.sumstats".format(out, pheno))
@@ -363,6 +365,7 @@ def get_test_statistics_bgen(
 
     if binary:
         pheno_columns = check_case_control_sep(traits, covar, offset_list, unique_chrs)
+        pheno_columns = np.intersect1d(pheno_columns, firth_null_list[0].columns.tolist()).tolist()
         traits = traits[pheno_columns]
         covar_effects = covar_effects[pheno_columns]
         for i in range(len(offset_list)):
