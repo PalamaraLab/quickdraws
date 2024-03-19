@@ -365,7 +365,8 @@ def get_test_statistics_bgen(
 
     if binary:
         pheno_columns = check_case_control_sep(traits, covar, offset_list, unique_chrs)
-        pheno_columns = np.intersect1d(pheno_columns, firth_null_list[0].columns.tolist()).tolist()
+        pheno_columns = ['FID','IID'] + np.intersect1d(pheno_columns[2:], firth_null_list[0].columns.tolist()).tolist()
+        print(pheno_columns)
         traits = traits[pheno_columns]
         covar_effects = covar_effects[pheno_columns]
         for i in range(len(offset_list)):
