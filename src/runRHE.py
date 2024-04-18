@@ -308,7 +308,7 @@ def runRHE(
 
     # now run RHE
     if True:
-        cmd = "./" + rhemc + " -g " + bedfile + " -p " + pheno + " -annot " + annotation
+        cmd = rhemc + " -g " + bedfile + " -p " + pheno + " -annot " + annotation
         if covariates is not None:
             pheno_df = pd.read_csv(pheno, sep="\s+")
             covariates_df = pd.read_csv(covariates, sep="\s+")
