@@ -582,6 +582,7 @@ class Trainer:
                 for prs_no in np.where(phen_no)[0]:
                     num = self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy()
                     denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*test_r2_anc[prs_no, chr_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
+                    #denom = self.var_y[prs_no]*(1 - test_r2_anc[prs_no, chr_no]**2) ## correction 1
                     neff[chr_no, prs_no] = num/denom
             
             pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)

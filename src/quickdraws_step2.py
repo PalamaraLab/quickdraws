@@ -128,11 +128,17 @@ def calibrate_test_stats(
     overall_correction_dict = {}
     if 'Firth' in sumstats_cur.columns:
         for chr in np.unique(sumstats_ref['CHR']):
+            ## Order True, False is important
             for is_firth in [True, False]:
                 ess = sumstats_cur.loc[(sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth),"OBS_CT"].values*float(neff[str(chr)])/sumstats_ref.loc[(sumstats_ref.CHR == chr)  & (sumstats_cur.Firth == is_firth),"OBS_CT"].values
-                overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth)].CHISQ)
+                overall_correction = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth)].CHISQ) 
+                if is_firth:
+                    overall_correction_all = (ess * (np.mean(sumstats_ref[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ) - 1) + 1)/np.mean(sumstats_cur[(sumstats_ref.ALT_FREQS > 0.01) & (sumstats_ref.ALT_FREQS < 0.99) & (sumstats_ref.CHR == chr)].CHISQ)
+                    if np.mean(overall_correction) > np.mean(overall_correction_all):
+                        ## Being conservative: sometimes Firth only correction has high variance and leads to higher overall_correction, we instead chose a lower variance estimator utilizing all common SNPs in the chromosome
+                        overall_correction = overall_correction_all.copy()
                 if pheno == 'fake10':
-                    print(str(np.mean(overall_correction)) + " " + str(chr) + " " + str(is_firth) + " " + str(np.mean(ess)))
+                    print(str(np.mean(overall_correction)) + " " + str(chr) + " " + str(is_firth) + " " + str(np.mean(ess)) + " " + str(len(ess)))
                 overall_correction_dict[(chr, is_firth)] = np.mean(overall_correction)
                 sumstats_cur.loc[(sumstats_ref.CHR == chr) & (sumstats_cur.Firth == is_firth), "CHISQ"] *= overall_correction
 

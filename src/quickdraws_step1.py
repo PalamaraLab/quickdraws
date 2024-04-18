@@ -86,10 +86,10 @@ parser.add_argument(
 )
 ## hyperparameters arguments
 parser.add_argument(
-    "--num_epochs", help="number of epochs to train loco run", type=int, default=30
+    "--num_epochs", help="number of epochs to train loco run", type=int, default=40
 )
 parser.add_argument(
-    "--alpha_search_epochs", help="number of epochs to train for alpha search", type=int, default=90
+    "--alpha_search_epochs", help="number of epochs to train for alpha search", type=int, default=80
 )
 parser.add_argument(
     "--lr",
@@ -142,7 +142,7 @@ parser.add_argument(
     "--train_split",
     help="The training split proportion in (0,1)",
     type=float,
-    default=0.8,
+    default=0.9,
 )
 parser.add_argument(
     "--binary",
