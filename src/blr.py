@@ -38,6 +38,22 @@ def str_to_bool(s: str) -> bool:
 
 ## Custom layers:
 class BBB_Linear_spike_slab(nn.Module):
+    ''' This class is a custom PyTorch module implementing a Bayesian Linear layer with spike-and-slab priors. 
+    This advanced concept is used in Bayesian neural networks to introduce sparsity in the model weights. 
+    
+    __init__ : Inherit from nn.Module: Inherits from PyTorch's base class for all neural network modules.
+    Parameters: Accepts parameters like the number of samples to draw during inference (num_samples), the shape of the weights tensor (weights_shape, from the fc1 layer), 
+    a sparsity-controlling hyperparameter (alpha), and the standard deviation of the prior distribution (prior_sig).
+
+    Spike Parameter: Initializes the spike1 parameter as a learnable tensor with uniform values set to alpha. 
+    This parameter represents the probability of a weight being in the "slab" (non-zero values) part of the spike-and-slab distribution.
+    
+    Model Attributes: Sets various attributes like the number of samples (num_samples), the sparsity parameter (alpha), 
+    a scaling factor (c), and both the variance and log-variance of the prior distribution (prior_var and log_prior_var).
+    
+    Sigma Parameter: Initializes sigma1 as a learnable parameter representing the standard deviation 
+    of the posterior distribution of the weights, starting with the values from prior_sig.
+    '''
     def __init__(
         self,
         num_samples,
@@ -46,6 +62,29 @@ class BBB_Linear_spike_slab(nn.Module):
         prior_sig: torch.Tensor,
         mu1,
     ):
+    '''
+    Input Checks and Adjustments: Adjusts the scaling factor (c) to ensure stability and clamps the sigma (sig1) 
+    and spike (spike) parameters to avoid extreme values.
+    
+    Local Reparameterization: Calls local_reparameterize to generate the output of the layer. 
+    This method samples from the approximate posterior distribution of the weights and biases to obtain the layer's output.
+
+    Output Only Mode: If only_output is True, returns only the layer's output, 
+    skipping the calculation of the Kullback-Leibler (KL) divergence.
+    
+    KL Divergence: Computes the KL divergence between the posterior and prior distributions of the weights as a regularizer. 
+
+    Evaluation Steps:
+    1. Variance Adjustment: The sig1 parameter is clamped to a minimum value (eps) to prevent division by zero and other numerical issues.
+    2. Log Variance: The log variance of the posterior distribution (sig1 squared) is computed to stabilize the computation and for ease of calculation.
+    3. KL Computation: The KL divergence is then computed as the sum of two parts:
+        The first part evaluates the Gaussian component, considering the log variance of the posterior, 
+        the variance of the prior, and the squared difference between the posterior mean and zero.
+        The second part accounts for the spike component, penalizing the probability of non-zero weights based on 
+        the prior sparsity expectation (alpha).
+    4. Scaling by Number of Samples: The final KL divergence is scaled by the number of samples (num_samples) to 
+    average the divergence over all data points, making it more representative of the entire dataset.
+    '''
         super(BBB_Linear_spike_slab, self).__init__()
         self.spike1 = nn.Parameter(torch.empty(weights_shape).uniform_(alpha, alpha))
         self.num_samples = num_samples
@@ -147,6 +186,42 @@ class BBB_Linear_spike_slab(nn.Module):
 
 ## Neural network model:
 class Model(nn.Module):
+    '''
+    The Model class extends PyTorch's nn.Module and encapsulates a neural network model that utilizes 
+    a Bayesian by Backpropagation Linear layer with spike-and-slab priors (BBB_Linear_spike_slab).
+
+    __init__ : Inherits from nn.Module, PyTorch's base class for all neural network modules. Parameters:
+
+    dim_in: Input dimensionality. 
+    The input dimension of the model is set to the number of SNPs not on the chromosome currently being left out (LOCO analysis). 
+    This is determined by counting the SNPs where chr_map != chr, ensuring that the model only considers SNPs from other chromosomes.
+
+    dim_out: Output dimensionality.
+    The output dimension is determined by the count of elements in dim_out that match the current alpha_no. 
+    This effectively sets the number of outputs to match the number of traits or phenotypes 
+    being analyzed under the current alpha configuration.
+
+    num_samples: Number of samples to draw from the posterior during inference.
+    Specifies the number of samples to draw from the posterior distribution during inference. 
+    
+    alpha: Hyperparameter for controlling the sparsity in the weights.
+
+    prior_sig: Standard deviation of the prior distribution of the weights.
+
+    posterior_sig: Optional; standard deviation of the posterior distribution of the weights, initialized during training.
+    Specifies the standard deviation of the posterior distribution of the weights. Like prior_sig, it is adjusted for the current alpha_no and excludes SNPs from the current chromosome. 
+    
+    mu: Optional; initial mean values of the posterior distribution of the weights.
+    Represents the mean values of the posterior distribution of the weights. If provided, mu is filtered based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the specified device. 
+    This operation initializes the model's weights with values potentially learned from previous analyses or a different context.
+
+    spike: Optional; initial values of the spike variable, controlling the sparsity of the weights.
+    Specifies the spike parameter values for the spike-and-slab prior. Like mu, if spike is provided, it is processed based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the device. 
+    The spike parameter controls the sparsity in the model's weights, complementing the role of alpha.
+
+    Initializes a linear layer (fc1) without bias, followed by a BBB_Linear_spike_slab layer (sc1) with specified parameters.
+    Optionally sets posterior_sig, mu, and spike if provided.
+    '''
     def __init__(
         self,
         dim_in,
@@ -177,6 +252,17 @@ class Model(nn.Module):
             # logging.info("Initializing posterior spike through transfer learning")
             self.sc1.spike1.data = spike.to(self.sc1.spike1.device)
 
+    '''
+    x: Input tensor.
+    offset: Offset to be added to the output, typically used in generalized linear models.
+    only_output: If True, skips the computation of KL divergence, returning only the layer's output.
+    test: Indicates inference mode, affecting the sampling behavior in the BBB_Linear_spike_slab layer.
+    binary: If True, applies a sigmoid activation function to the output, useful for binary classification tasks.
+
+    Propagates x through the BBB_Linear_spike_slab layer, obtaining the output and the KL divergence term.
+    Adds the offset to the output. If binary is True, applies the sigmoid function to transform outputs into probabilities.
+    Returns the final output and the scaled KL divergence term, multiplied by the number of batches.
+    '''
     def forward(self, x, offset, only_output=False, test=False, binary=False):
         num_batches = x.shape[0]
         x, reg = self.sc1(x, self.fc1, only_output, test)
@@ -298,6 +384,11 @@ class Trainer:
         predBetasFlag=False
     ):
         self.args = args
+        '''
+        The dimensionality of h2 is checked. If h2 is two-dimensional, it is summed across one axis to reduce it to a 
+        one-dimensional array. This simplification might be applied when h2 contains SNP-specific heritability estimates, 
+        and a simpler per-trait estimate is needed for training.
+        '''
         if h2.ndim == 2:
             self.h2 = torch.sum(h2, axis=1)
         else:
@@ -305,15 +396,29 @@ class Trainer:
         self.device = device
         self.model_list = model_list
         self.num_samples = train_dataset.length
+        '''
+        df_iid_fid: Creates a DataFrame to map the internal individual IDs (IID) and family IDs (FID) from the train_dataset. 
+        '''
         self.df_iid_fid = pd.DataFrame(
             train_dataset.iid, columns=["FID", "IID"]
         )
         self.df_iid_fid[['FID','IID']] = self.df_iid_fid[['FID','IID']].astype('str')
         self.df_iid_fid = self.df_iid_fid['FID'].str.cat(self.df_iid_fid['IID'].values,sep='_')
+        '''
+        Determines how often the validation should be performed during training. 
+        '''
         self.validate_every = validate_every if validate_every > 0 else 1
         self.never_validate = validate_every < 0
+         '''
+        If provided, this indicates the chromosome mapping for each genetic variant in the dataset. 
+        This information is crucial for LOCO analysis, where the influence of specific chromosomes is assessed 
+        by excluding them from the model training.
+        '''
         self.chr_map = chr_map
         self.alpha = alpha
+         '''
+        Calculates the variance of the covariate effects from the train_dataset. 
+        '''
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().to(device)**2
         if args.binary:
             self.var_covar_effect = torch.std(torch.sigmoid(train_dataset.covar_effect), axis=0).float().to(device)**2
@@ -339,6 +444,10 @@ class Trainer:
 
         if pheno_for_model is not None:
             self.pheno_for_model = pheno_for_model
+        '''
+        Initializes optimizers for each model, configuring them with the specified learning rates and other 
+        optimization parameters (adam_eps, weight_decay).
+        '''
         self.optimizer_list = []
         for model_no, model in enumerate(model_list):
             if device == 'cuda':
@@ -373,6 +482,9 @@ class Trainer:
                         eta_min=self.args.min_learning_rate,
                     )
                 )
+        '''
+        sets up the loss functions (mse_loss, bce_loss) and selects the appropriate one based on whether the phenotype is binary.
+        '''
         self.mse_loss = nn.MSELoss(reduction="none")
         self.bce_loss = nn.BCELoss(reduction="none")
         self.loss_func = (
@@ -396,7 +508,9 @@ class Trainer:
         )
         self.pheno_names = train_dataset.pheno_names
 
-    ## masked BCE loss function
+    '''
+    These functions compute the MSE and BCE losses, respectively, while ignoring NaN values in the labels and predictions. 
+    '''
     def masked_bce_loss(self, preds, labels, h2=0.5):
         mask = (~torch.isnan(labels)) & (~torch.isnan(preds))
         loss = self.bce_loss(preds[mask], labels[mask])
@@ -411,32 +525,55 @@ class Trainer:
             sq_error = sq_error
         return torch.sum(sq_error)  ## reduction = sun
 
+     '''
+    Calculates the coefficient of determination (R²) for model predictions versus actual labels, chromosome by chromosome. 
+    This is crucial for getting the effective sample size for calibration in step2.
+    '''
     def get_chr_r2(self, beta):
         with torch.no_grad():
             r2 = np.zeros((beta.shape[1], self.num_chr))
+            '''
+            Loops through each chromosome in self.unique_chr_map. 
+            For each chromosome, the function prepares to collect model predictions (preds_arr_chr) and actual labels (labels_arr) across the entire test dataset.
+            '''
             for chr_no, chr in enumerate(self.unique_chr_map):
                 preds_arr_chr = []
                 labels_arr = []
+                '''
+                Generates predictions (preds_c) for each genetic variant, excluding those from the current chromosome (chr). 
+                This is achieved by selecting columns from input and beta corresponding to all chromosomes except chr, 
+                effectively simulating a LOCO scenario.
+                '''
                 for input, covar_effect, label in self.test_dataloader:
                     input, covar_effect = (
                         input.to(self.device),
                         covar_effect.to(self.device),
                     )
                     preds_c = input[:, self.chr_map != chr]@(beta[:, self.chr_map != chr].T)
+                    '''adjusts predictions by adding covariate effects (covar_effect), accounting for non-genetic factors.'''
                     preds_c += covar_effect
+                    ''' Applies a sigmoid transformation to the predictions if the analysis is binary (self.args.binary), converting the linear output to probabilities.'''
                     if self.args.binary:
                         preds_c = torch.sigmoid(preds_c)
                     preds_arr_chr.extend(preds_c.cpu().numpy().tolist())
                     labels_arr.extend(label.numpy().tolist())
-                
+                    
                 preds_arr_chr = np.array(preds_arr_chr)
                 labels_arr = np.array(labels_arr)
+                '''
+                For each phenotype (prs_no), calculates the Pearson correlation coefficient between the aggregated predictions 
+                and labels. The square of this coefficient gives the R² value, indicating how well the genetic variants 
+                (excluding those on the current chromosome) predict the phenotype.
+                '''
                 for prs_no in range(beta.shape[0]):
                     r2[prs_no, chr_no] = stats.pearsonr(preds_arr_chr[:, prs_no], labels_arr[:, prs_no])[0]
         
         return r2
 
     def validation(self):
+        '''
+        Performs a validation run, using the models to predict on the test dataset and compute loss metrics. 
+        '''
         labels_arr = [[] for _ in range(len(self.model_list))]
         preds_arr = [[] for _ in range(len(self.model_list))]
         # preds_arr_chr = [[[] for k in range(self.num_chr)] for _ in range(len(self.model_list))]
@@ -535,6 +672,9 @@ class Trainer:
         return log_dict
 
     def save_exact_blup_estimates(self, best_alpha, out, test_r2_anc):
+        '''
+        After training, this function computes and saves LOCO predictions for the entire dataset.
+        '''
         ## Saves the exact LOCO estimates for the entire dataset in a text file
         ## best_alpha is a number_phenotypes x 1 vector indicating the best alpha index for each phenotype
         dim_out = len(self.h2)
@@ -588,6 +728,9 @@ class Trainer:
             pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
 
     def train_epoch(self, epoch):
+        '''
+        Main training function for whole-genome regression
+        '''
         logging.info("Epoch: " + str(epoch+1) + "/" + str(self.args.alpha_search_epochs))
         for input, covar_effect, label in self.train_dataloader:
             log_dict = {}
@@ -684,6 +827,9 @@ class Trainer:
         return log_dict
 
     def train_epoch_loco(self, epoch):
+        '''
+        Main training function for the LOCO regression
+        '''
         logging.info("Epoch: " + str(epoch+1) + "/" + str(self.args.num_epochs))
         for input, covar_effect, label in self.train_dataloader:
             # st = time.time()
@@ -754,6 +900,11 @@ def initialize_model(
     spike=None,
     predBetasFlag=False
 ):
+    '''
+     If chr_map is provided, the unique chromosomes are identified. 
+     Additionally, if predBetasFlag is set to True, an extra chromosome is added to the list, 
+     possibly for handling global effects.
+    '''
     model_list = []
     num_snps = len(std_genotype)
     if chr_map is not None:
@@ -761,12 +912,28 @@ def initialize_model(
         if predBetasFlag: 
             unique_chr.append(max(unique_chr) + 1)
 
+    '''
+    If h2 (heritability) has 2 dimensions, indicating different heritabilities for different SNPs, 
+    both std_genotype and std_y are adjusted to add an extra dimension for compatibility.
+
+    Multiple Phenotypes: In studies analyzing multiple traits or phenotypes simultaneously, 
+    each phenotype might have a distinct heritability estimate. 
+    A two-dimensional h2 array can store these varying estimates, 
+    with one dimension indexing the phenotypes and the other representing the heritability estimates for each phenotype.
+    '''
+
     if h2.ndim == 2:
         std_genotype = std_genotype.unsqueeze(0)
         std_y = std_y.unsqueeze(1)
 
     # std_y = 1 ## CAUTION!!!
+    '''For each alpha value in alpha_list, which may control the sparsity of the model:'''
     for alpha_no, alpha in enumerate(alpha_list):
+        '''
+        Prior and Posterior Standard Deviations: For each alpha, the prior and posterior standard deviations (prior_sig and posterior_sig) 
+        of the model weights are calculated based on std_genotype, std_y, and h2. 
+        These calculations differ depending on the dimensionality of h2.
+        '''
         if h2.ndim == 1:
             prior_sig = math.sqrt(1 / len(std_genotype) / alpha) / std_genotype
             prior_sig = torch.outer(std_y * torch.sqrt(h2), prior_sig)
@@ -792,9 +959,23 @@ def initialize_model(
             ) * posterior_sig
 
         assert posterior_sig.shape == prior_sig.shape
+        
+        '''
+        Model Instantiation:
+        If LOCO analysis is specified (loco == "exact"), a model is created for each chromosome, excluding the current chromosome's 
+        SNPs from the input dimension (dim_in). This is achieved by filtering chr_map != chr.
+        
+        If not in LOCO mode, a single model is created with input dimension equal to the total number of SNPs 
+        and output dimension equal to the length of h2 (number of phenotypes or traits).
+        '''
         if loco == "exact":
             assert len(dim_out)
             for chr_no, chr in enumerate(unique_chr):
+                '''
+                Optional parameters mu and spike are set if provided. 
+                These parameters might represent the mean and sparsity (respectively) of the posterior distribution 
+                of the model's weights, possibly derived from prior knowledge or a pre-training step.
+                '''
                 model = Model(
                     dim_in=len(chr_map[chr_map != chr]),
                     dim_out=int(sum(dim_out == alpha_no)),
@@ -834,10 +1015,14 @@ def initialize_model(
             model = model.to(device)
             # model = torch.compile(model)
             model_list.append(model)
+    '''The function returns the list of initialized models (model_list), ready for training or inference.'''
     return model_list
 
 
 def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda"):
+    '''
+    The hyperparam_search function performs sparsity search
+    '''
     # Define datasets and dataloaders
     # logging.info("Loading the data to RAM..")
     start_time = time.time()
@@ -856,6 +1041,12 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         std_y = torch.sqrt(1 - torch.std(train_dataset.covar_effect, axis=0).float()**2)
     h2 = torch.as_tensor(h2).float()
 
+    '''
+    Initializes a list of models using the initialize_model function, with each model configured according to a specific alpha 
+    value and other parameters like the standard deviations, heritability, and sample sizes.
+
+    The hyperparameter search utilizes the entire dataset (all chromosomes) but splits into 90% train and 10% test data
+    '''
     model_list = initialize_model(
         alpha,
         std_genotype,
@@ -868,6 +1059,10 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     # Define trainer for training the model
     logging.info("Starting search for optimal alpha...")
     start_time = time.time()
+    
+    '''
+    A Trainer instance is created to manage the model training process
+    '''
     trainer = Trainer(
         args,
         alpha,
@@ -883,14 +1078,20 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     )
     ##caution!!
     log_dict = {}
-    st1 = time.time()
+    
+    '''
+    Iterates over a specified number of epochs (args.alpha_search_epochs), 
+    during which the models are trained using the training dataset.
+    '''
     for epoch in tqdm(range(args.alpha_search_epochs)):
         log_dict = trainer.train_epoch(epoch)
-    te1 = (time.time() - st1)*(90 - args.alpha_search_epochs)/args.alpha_search_epochs
-    print("time added for extrapolation = " + str(te1))
-
     
     ## re-evaluate loss and r2 and the end of training
+    '''
+    After training, the function re-evaluates loss and R² (coefficient of determination) metrics to assess model performance. 
+    These metrics are calculated for each phenotype and alpha value, providing insight into which alpha leads to the best 
+    model performance in terms of prediction accuracy and error minimization.
+    '''
     log_dict = trainer.log_r2_loss(log_dict)
     output_loss = np.zeros((dim_out, len(alpha)))
     output_r2 = np.zeros((dim_out, len(alpha)))
@@ -915,13 +1116,24 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
     logging.info("Best R2 across all alpha values: " + str(np.max(output_r2, axis=1)))
     logging.info("Best MSE across all alpha values: " + str(np.min(output_loss, axis=1)))
     logging.info("Best Neff across all alpha values: " + str(np.max(output_neff, axis=1)))
-
+    
+    '''
+    Identifies the best alpha values by finding those that minimize the loss for each phenotype. 
+    The effective number of samples (neff_best) corresponding to the best alpha values is saved for further use.
+    '''
     best_alpha = np.argmin(output_loss, axis=1)
     neff_best = np.array([output_neff[i, best_alpha[i]] for i in range(dim_out)])
     np.savetxt(args.out + '.step1.neff', neff_best)
 
     # r2_best = np.array([output_r2_chr[:, i, best_alpha[i]] for i in range(dim_out)])
-
+    
+    '''
+    Extracts the mean (mu) and spike parameters from the models corresponding to the best alpha values. 
+    These parameters represent the learned weights and their sparsity, respectively.
+    
+    Calculates R² values for each chromosome using the best models, providing insight into the predictive performance 
+    across different genomic regions.
+    '''
     mu_list = torch.zeros((dim_out, len(std_genotype))).to(device)
     spike_list = torch.zeros((dim_out, len(std_genotype))).to(device)
     for prs_no in range(dim_out):
@@ -961,11 +1173,16 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         with torch.no_grad():
             torch.cuda.empty_cache()
 
-    logging.info("Done search for alpha in: " + str(time.time() + te1 - start_time) + " secs")
+    logging.info("Done search for alpha in: " + str(time.time() - start_time) + " secs")
     return -output_loss, mu_list, spike_list, r2_best
 
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
+    '''
+    The blr_spike_slab function encapsulates the entire process of performing Bayesian Linear Regression (BLR) with spike-and-slab priors, 
+    specifically tailored for genetic data analysis. It includes steps for hyperparameter tuning, model training on the entire 
+    dataset, and the computation of Bayesian estimates. 
+    '''
     overall_start_time = time.time()
     if not args.wandb_mode == "disabled":
         logging.info("Initializing wandb to log the progress..")
@@ -981,10 +1198,15 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     alpha = args.alpha #[0.01, 0.02, 0.05, 0.1, 0.2, 0.5]
 
     assert len(alpha) == len(args.lr), "Length of sparsity parameters should be equal to learning rates provided"
+    '''Creates a dictionary mapping each alpha value to its corresponding learning rate.'''
     lr_dict = {}
     for a, l in zip(alpha, args.lr):
         lr_dict[a] = l
 
+    ''' 
+    Initializes training and testing datasets using the HDF5Dataset class, specifying parameters like split type, file name, 
+    batch size, and memory management options.
+    '''
     train_dataset = HDF5Dataset(
         split="train",
         filename=hdf5_filename,
@@ -1004,6 +1226,13 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         lowmem=args.lowmem
     )
 
+    '''
+    Hyperparameter Search (Optional Grid Search for Heritability):
+    If args.h2_grid is enabled, performs a grid search over specified heritability (h2) values to find the optimal setting.
+    For each heritability value in the grid, it runs the hyperparam_search function to find the best alpha values and 
+    captures the corresponding R² scores, mean (mu), and spike parameters.
+    Determines the best heritability setting based on maximum R² scores or other criteria and updates the parameters accordingly.
+    '''
     if args.h2_grid:
         h2_grid = np.array([0.01, 0.25, 0.5, 0.75])
         logging.info("Starting a grid search for heritability within BLR...")
@@ -1072,6 +1301,16 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## output_loss_subset.shape = number of phenotypes x len(best_alpha)
     logging.info("Training on entire data with best alphas: " + str(alpha))
+
+    '''
+    Model Training on Entire Dataset:
+    Re-initializes the full dataset including both training and test data.
+    Prepares standard genotype and phenotype data, along with heritability estimates, for model initialization.
+    Initializes models for the entire dataset based on the best alpha values identified earlier, taking into account specific configurations like LOCO analysis.
+    Trains the models on the entire dataset using the Trainer class with configurations for LOCO analysis and the best learning rates.
+    
+    mu and spike are initialised from the hyperparam search
+    '''
 
     # logging.info("Loading the data to RAM..")
     start_time = time.time()
@@ -1142,15 +1381,11 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         predBetasFlag=args.predBetasFlag
     )
     
-    st1 = time.time()
     for epoch in tqdm(range(args.num_epochs)):
         _ = trainer.train_epoch_loco(epoch)
-    te1 = (time.time() - st1)*(30 - args.num_epochs)/args.num_epochs
-    print("time added for extrapolation = " + str(te1))
-
     ## Calculate estimates
 
-    logging.info("Done fitting the model in: " + str(time.time() + te1 - start_time) + " secs")
+    logging.info("Done fitting the model in: " + str(time.time() - start_time) + " secs")
 
     logging.info("Saving exact LOCO estimates...")
     start_time = time.time()
@@ -1162,6 +1397,14 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         + str(time.time() - start_time)
         + " secs"
     )
+
+    '''
+    If args.predBetasFlag is true, calculates the Best Linear Unbiased Prediction (BLUP) Betas for the entire dataset 
+    using the trained models. This involves extracting the mean (mu) and spike parameters from the models corresponding 
+    to the best alpha values and computing the product to obtain the Betas.
+
+    Calculation of BLUP Betas: The BLUP Betas are computed as the product of mu and spike parameters.
+    '''
 
     if args.predBetasFlag:
         logging.info("Calculating the BLUP Betas using the entire data...")
