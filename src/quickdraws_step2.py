@@ -382,7 +382,7 @@ def get_test_statistics_bgen(
                 firth_null_list[i] = firth_null_list[i][pheno_columns]
 
     if calibrationFile is not None:
-        calibration_factors = pd.read_csv(calibrationFile, sep='\s+')
+        calibration_factors = pd.read_csv(calibrationFile, sep='\t')
         logging.info("Using calibration file specified in: " + str(calibrationFile))
     else:
         calibration_factors = pd.DataFrame(np.ones((len(traits.columns.tolist()) - 2, len(unique_chrs))), columns=unique_chrs)
