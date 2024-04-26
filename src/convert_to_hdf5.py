@@ -62,8 +62,8 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=512,
             .val
         )
         geno_covar_effect_numba, xtx_numba = get_xtx(x, covars, K)
-        xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] = xtx_numba
         xtx_numba[np.std(x, axis=0) == 0] = 0  ## set fixed variants to have 0 std (o/w have small -ve values due to numerical issues in numba)
+        xtx[i : min(i + chunk_size, snp_on_disk.shape[1])] = xtx_numba
         geno_covar_effect[:, i : min(i + chunk_size, snp_on_disk.shape[1])] = geno_covar_effect_numba
         if (xtx_numba < 0).any():
             logging.exception("Check if covariates are independent, the covariate linear regression might be unstable...")
