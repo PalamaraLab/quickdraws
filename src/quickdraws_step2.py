@@ -309,7 +309,9 @@ def get_test_statistics(
             delayed(partial_calibrate_test_stats)(phen, neff.iloc[i]) for i, phen in enumerate(pheno_columns[2:])
         )
         logging.info("Caliration factors stored in: " +str(out) + ".calibration")
-        pd.DataFrame(correction).to_csv(out + '.calibration', sep='\t', index=None)
+        df = pd.DataFrame(correction)
+        df['pheno'] = pheno_columns[2:]
+        df.to_csv(out + '.calibration', sep='\t', index=None)
         # np.savetxt(out + ".calibration", correction)
     else:
         correction = None
@@ -371,7 +373,7 @@ def get_test_statistics_bgen(
 
     if binary:
         pheno_columns = check_case_control_sep(traits, covar, offset_list, unique_chrs)
-        pheno_columns = ['FID','IID'] + np.intersect1d(pheno_columns[2:], firth_null_list[0].columns.tolist()).tolist()
+        pheno_columns = ['FID','IID'] + np.intersect1d(pheno_columns[2:], firth_null_list[0].columns.tolist()).tolist()  ## this sorts the phenotypes...
         print(pheno_columns)
         traits = traits[pheno_columns]
         covar_effects = covar_effects[pheno_columns]
@@ -385,6 +387,7 @@ def get_test_statistics_bgen(
         calibration_factors = pd.read_csv(calibrationFile, sep='\t')
         logging.info("Using calibration file specified in: " + str(calibrationFile))
     else:
+        ## TODO: make it general for binary traits with firth where the columns double
         calibration_factors = pd.DataFrame(np.ones((len(traits.columns.tolist()) - 2, len(unique_chrs))), columns=unique_chrs)
 
     logging.info("Running linear/logistic regression...")
@@ -408,7 +411,7 @@ def get_test_statistics_bgen(
     )
 
     Parallel(n_jobs=n_workers)(
-        delayed(adjust_test_stats)(out, phen, calibration_factors.iloc[i])
+        delayed(adjust_test_stats)(out, phen, calibration_factors[calibration_factors.pheno == phen].iloc[0])
         for i, phen in enumerate(pheno_columns[2:])
     )
     logging.info("Summary stats stored as: " + str(out) + ".{pheno}.sumstats{.gz}")
