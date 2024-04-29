@@ -62,29 +62,29 @@ class BBB_Linear_spike_slab(nn.Module):
         prior_sig: torch.Tensor,
         mu1,
     ):
-    '''
-    Input Checks and Adjustments: Adjusts the scaling factor (c) to ensure stability and clamps the sigma (sig1) 
-    and spike (spike) parameters to avoid extreme values.
-    
-    Local Reparameterization: Calls local_reparameterize to generate the output of the layer. 
-    This method samples from the approximate posterior distribution of the weights and biases to obtain the layer's output.
+        '''
+        Input Checks and Adjustments: Adjusts the scaling factor (c) to ensure stability and clamps the sigma (sig1) 
+        and spike (spike) parameters to avoid extreme values.
+        
+        Local Reparameterization: Calls local_reparameterize to generate the output of the layer. 
+        This method samples from the approximate posterior distribution of the weights and biases to obtain the layer's output.
 
-    Output Only Mode: If only_output is True, returns only the layer's output, 
-    skipping the calculation of the Kullback-Leibler (KL) divergence.
-    
-    KL Divergence: Computes the KL divergence between the posterior and prior distributions of the weights as a regularizer. 
+        Output Only Mode: If only_output is True, returns only the layer's output, 
+        skipping the calculation of the Kullback-Leibler (KL) divergence.
+        
+        KL Divergence: Computes the KL divergence between the posterior and prior distributions of the weights as a regularizer. 
 
-    Evaluation Steps:
-    1. Variance Adjustment: The sig1 parameter is clamped to a minimum value (eps) to prevent division by zero and other numerical issues.
-    2. Log Variance: The log variance of the posterior distribution (sig1 squared) is computed to stabilize the computation and for ease of calculation.
-    3. KL Computation: The KL divergence is then computed as the sum of two parts:
-        The first part evaluates the Gaussian component, considering the log variance of the posterior, 
-        the variance of the prior, and the squared difference between the posterior mean and zero.
-        The second part accounts for the spike component, penalizing the probability of non-zero weights based on 
-        the prior sparsity expectation (alpha).
-    4. Scaling by Number of Samples: The final KL divergence is scaled by the number of samples (num_samples) to 
-    average the divergence over all data points, making it more representative of the entire dataset.
-    '''
+        Evaluation Steps:
+        1. Variance Adjustment: The sig1 parameter is clamped to a minimum value (eps) to prevent division by zero and other numerical issues.
+        2. Log Variance: The log variance of the posterior distribution (sig1 squared) is computed to stabilize the computation and for ease of calculation.
+        3. KL Computation: The KL divergence is then computed as the sum of two parts:
+            The first part evaluates the Gaussian component, considering the log variance of the posterior, 
+            the variance of the prior, and the squared difference between the posterior mean and zero.
+            The second part accounts for the spike component, penalizing the probability of non-zero weights based on 
+            the prior sparsity expectation (alpha).
+        4. Scaling by Number of Samples: The final KL divergence is scaled by the number of samples (num_samples) to 
+        average the divergence over all data points, making it more representative of the entire dataset.
+        '''
         super(BBB_Linear_spike_slab, self).__init__()
         self.spike1 = nn.Parameter(torch.empty(weights_shape).uniform_(alpha, alpha))
         self.num_samples = num_samples
@@ -409,14 +409,14 @@ class Trainer:
         '''
         self.validate_every = validate_every if validate_every > 0 else 1
         self.never_validate = validate_every < 0
-         '''
+        '''
         If provided, this indicates the chromosome mapping for each genetic variant in the dataset. 
         This information is crucial for LOCO analysis, where the influence of specific chromosomes is assessed 
         by excluding them from the model training.
         '''
         self.chr_map = chr_map
         self.alpha = alpha
-         '''
+        '''
         Calculates the variance of the covariate effects from the train_dataset. 
         '''
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().to(device)**2
@@ -525,7 +525,7 @@ class Trainer:
             sq_error = sq_error
         return torch.sum(sq_error)  ## reduction = sun
 
-     '''
+    '''
     Calculates the coefficient of determination (R²) for model predictions versus actual labels, chromosome by chromosome. 
     This is crucial for getting the effective sample size for calibration in step2.
     '''
