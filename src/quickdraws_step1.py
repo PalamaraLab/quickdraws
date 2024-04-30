@@ -18,6 +18,12 @@ from runRHE import runRHE, MakeAnnotation, runSCORE
 from convert_to_hdf5 import convert_to_hdf5
 from blr import blr_spike_slab, str_to_bool
 
+def make_sure_path_exists(path):
+    try:
+        os.makedirs(path)
+    except FileExistsError:
+        pass
+
 overall_st = time.time()
 ######      Setting the random seeds         ######
 np.random.seed(2)
@@ -192,6 +198,10 @@ wandb_mode.add_argument(
     default="disabled",
     help="mode for wandb logging, useful while debugging",
 )
+wandb_mode.add_argument(
+    "--wandb_entity_name",
+    help="wandb entity name (usualy github ID)",
+)
 wandb_group.add_argument(
     "--wandb_project_name",
     help="wandb project name",
@@ -233,6 +243,8 @@ logging.info("#### Start Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M
 logging.info("")
 
 warnings.simplefilter("ignore")
+
+make_sure_path_exists(args.out)
 
 if args.out_step0 is not None:
     logging.info("#### Step 1a. Using preprocessed phenotype and hdf5 files ####")

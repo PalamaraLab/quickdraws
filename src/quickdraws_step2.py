@@ -33,6 +33,12 @@ from custom_linear_regression import (
 from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 import pdb
 
+def make_sure_path_exists(path):
+    try:
+        os.makedirs(path)
+    except FileExistsError:
+        pass
+
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
 
@@ -535,6 +541,8 @@ if __name__ == "__main__":
     st = time.time()
     logging.info("#### Start Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
     logging.info("")
+
+    make_sure_path_exists(args.out)
 
     offsets_file = args.out_step1
     traits = args.out_step1 + ".traits"

@@ -1189,7 +1189,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         wandb.init(
             mode=args.wandb_mode,
             project=args.wandb_project_name,
-            entity="hrushikeshloya",
+            entity=args.wandb_entity_name,
             job_type=args.wandb_job_type,
             config=args,
             dir=args.out,
