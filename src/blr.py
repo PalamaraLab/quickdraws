@@ -26,6 +26,9 @@ from joblib import Parallel, delayed
 import gc
 import pdb
 import logging
+
+from correct_for_relatives import get_correction_for_relatives
+
 logger = logging.getLogger(__name__)
 # torch._dynamo.config.cache_size_limit = 32
 
@@ -671,7 +674,7 @@ class Trainer:
                 ] = (self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy())/(self.var_y[prs_no] + np.std(preds_arr[model_no,:,prs_no])**2 - 2*test_r2_anc[0]*np.std(preds_arr[model_no,:,prs_no])*np.sqrt(self.var_y[prs_no]))
         return log_dict
 
-    def save_exact_blup_estimates(self, best_alpha, out, test_r2_anc):
+    def save_exact_blup_estimates(self, best_alpha, out, test_r2_anc, correction_relatives):
         '''
         After training, this function computes and saves LOCO predictions for the entire dataset.
         '''
@@ -723,7 +726,7 @@ class Trainer:
                     num = self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy()
                     denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*test_r2_anc[prs_no, chr_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
                     #denom = self.var_y[prs_no]*(1 - test_r2_anc[prs_no, chr_no]**2) ## correction 1
-                    neff[chr_no, prs_no] = num/denom
+                    neff[chr_no, prs_no] = num*correction_relatives[prs_no]/denom
             
             pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
 
@@ -1017,7 +1020,6 @@ def initialize_model(
             model_list.append(model)
     '''The function returns the list of initialized models (model_list), ready for training or inference.'''
     return model_list
-
 
 def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda"):
     '''
@@ -1336,7 +1338,8 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     num_chr = len(torch.unique(chr_map))
 
     if args.predBetasFlag: num_chr += 1
-
+    
+    ### caution: turn off transfer learning
     model_list = initialize_model(
         alpha,
         std_genotype,
@@ -1348,7 +1351,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         'exact',
         chr_map,
         mu=mu,
-        spike=spike,
+        spike=None,
         predBetasFlag=args.predBetasFlag
     )
     del mu
@@ -1383,6 +1386,17 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     
     for epoch in tqdm(range(args.num_epochs)):
         _ = trainer.train_epoch_loco(epoch)
+
+    ## Calculate correction for relatives
+    if args.kinship is not None:
+        kinship = pd.read_csv(args.kinship, sep='\s+')
+        correction_relatives = get_correction_for_relatives(full_dataset.iid[:, 0], kinship, h2.numpy())
+        logging.info('Sample size correction factor due to relatives = ' + str(correction_relatives))
+    else:
+        logging.info('--kinship wasnt provided so not correcting sample size estimate for relatives, this might lead to small inflation..')
+        correction_relatives = np.ones_like(h2.numpy())
+
+
     ## Calculate estimates
 
     logging.info("Done fitting the model in: " + str(time.time() - start_time) + " secs")
@@ -1390,7 +1404,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     logging.info("Saving exact LOCO estimates...")
     start_time = time.time()
     trainer.save_exact_blup_estimates(
-        np.argmax(output_r2_subset, axis=1), args.out, r2_best
+        np.argmax(output_r2_subset, axis=1), args.out, r2_best, correction_relatives=correction_relatives
     )
     logging.info(
         "Done writing exact LOCO estimates in: "

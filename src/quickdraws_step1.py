@@ -64,6 +64,11 @@ parser.add_argument(
     type=str,
 )
 parser.add_argument(
+    "--kinship",
+    help="King table file which stores relative information of upto 3rd degree relatives (tab-seperated and has ID1 ID2 Kinship as columns)",
+    type=str,
+)
+parser.add_argument(
     "--ldscores",
     help="Path to ldscores file (should have MAF and LDSCORE columns and tab-seperated)",
     type=str,
