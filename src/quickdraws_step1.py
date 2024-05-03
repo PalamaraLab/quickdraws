@@ -203,7 +203,7 @@ wandb_mode.add_argument(
     default="disabled",
     help="mode for wandb logging, useful while debugging",
 )
-wandb_mode.add_argument(
+wandb_group.add_argument(
     "--wandb_entity_name",
     help="wandb entity name (usualy github ID)",
 )
