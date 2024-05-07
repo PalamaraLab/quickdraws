@@ -104,6 +104,9 @@ parser.add_argument(
     "--alpha_search_epochs", help="number of epochs to train for alpha search", type=int, default=80
 )
 parser.add_argument(
+    "--validate_every", help="How often do you wanna validate the whole genomre regression (default = -1, which means never)", type=int, default=-1
+)
+parser.add_argument(
     "--lr",
     help="Learning rate of the optimizer",
     type=float,
