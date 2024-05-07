@@ -14,6 +14,7 @@ import time
 import numpy as np
 import scipy
 from scipy import stats
+from scipy.stats import norm
 import math
 import pandas as pd
 import copy
@@ -477,12 +478,12 @@ class Trainer:
                 )
         if self.args.cosine_scheduler:
             self.scheduler_list = []
-            for optimizer in self.optimizer_list:
+            for model_no, optimizer in enumerate(self.optimizer_list):
                 self.scheduler_list.append(
                     torch.optim.lr_scheduler.CosineAnnealingLR(
                         optimizer=optimizer,
                         T_max=self.args.num_epochs,
-                        eta_min=self.args.min_learning_rate,
+                        eta_min=lr[model_no]/2,
                     )
                 )
         '''
@@ -724,8 +725,8 @@ class Trainer:
                 # num_snps_ratio = math.sqrt(sum(self.chr_map != self.unique_chr_map[chr_no])/len(self.chr_map))
                 for prs_no in np.where(phen_no)[0]:
                     num = self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy()
-                    denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*test_r2_anc[prs_no, chr_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
-                    #denom = self.var_y[prs_no]*(1 - test_r2_anc[prs_no, chr_no]**2) ## correction 1
+                    #denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*test_r2_anc[prs_no, chr_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
+                    denom = self.var_y[prs_no]*(1 - test_r2_anc[prs_no, chr_no]**2) ## correction 1
                     neff[chr_no, prs_no] = num*correction_relatives[prs_no]/denom
             
             pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
@@ -1074,7 +1075,7 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         model_list,
         lr=args.lr,
         device=device,
-        validate_every=-1,
+        validate_every=3,
         chr_map = train_dataset.chr,
         predBetasFlag=args.predBetasFlag
     )
@@ -1351,7 +1352,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
         'exact',
         chr_map,
         mu=mu,
-        spike=None,
+        spike=spike,
         predBetasFlag=args.predBetasFlag
     )
     del mu
@@ -1390,11 +1391,19 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     ## Calculate correction for relatives
     if args.kinship is not None:
         kinship = pd.read_csv(args.kinship, sep='\s+')
-        correction_relatives = get_correction_for_relatives(full_dataset.iid[:, 0], kinship, h2.numpy())
+        h2 = h2.numpy()
+        if args.binary:
+            ## convert from liability to observed scale
+            prev = np.mean(full_dataset.output.numpy(), axis=0)
+            prev = np.minimum(prev, 1-prev)
+            z = norm.pdf(norm.ppf(1 - prev))
+            h2 = h2/(prev * (1 - prev) / (z**2))
+
+        correction_relatives = get_correction_for_relatives(full_dataset.iid[:, 0], kinship, h2)
         logging.info('Sample size correction factor due to relatives = ' + str(correction_relatives))
     else:
         logging.info('--kinship wasnt provided so not correcting sample size estimate for relatives, this might lead to small inflation..')
-        correction_relatives = np.ones_like(h2.numpy())
+        correction_relatives = np.ones_like(h2)
 
 
     ## Calculate estimates

@@ -136,7 +136,7 @@ if __name__ == '__main__':
     # fam = pd.merge(fam, traits[])
 
     ## get the estimated h2
-    h2 = 0.4
+    h2 = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
 
     correction = get_correction_for_relatives(fam.IID, kinship, h2)
     print(correction)
