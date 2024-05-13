@@ -535,7 +535,7 @@ class Trainer:
     '''
     def get_chr_r2(self, beta):
         with torch.no_grad():
-            r2 = np.zeros((beta.shape[1], self.num_chr))
+            var = np.zeros((beta.shape[1], self.num_chr))
             '''
             Loops through each chromosome in self.unique_chr_map. 
             For each chromosome, the function prepares to collect model predictions (preds_arr_chr) and actual labels (labels_arr) across the entire test dataset.
@@ -570,9 +570,9 @@ class Trainer:
                 (excluding those on the current chromosome) predict the phenotype.
                 '''
                 for prs_no in range(beta.shape[0]):
-                    r2[prs_no, chr_no] = stats.pearsonr(preds_arr_chr[:, prs_no], labels_arr[:, prs_no])[0]
+                    var[prs_no, chr_no] = np.std(labels_arr[:, prs_no] - preds_arr_chr[:, prs_no])**2 #stats.pearsonr(preds_arr_chr[:, prs_no], labels_arr[:, prs_no])[0]
         
-        return r2
+        return var
 
     def validation(self):
         '''
@@ -726,7 +726,8 @@ class Trainer:
                 for prs_no in np.where(phen_no)[0]:
                     num = self.var_y[prs_no] - self.var_covar_effect[prs_no].detach().cpu().numpy()
                     #denom = self.var_y[prs_no] + np.std(loco_estimates[chr_no, :, prs_no])**2 - 2*test_r2_anc[prs_no, chr_no]*np.std(loco_estimates[chr_no, :, prs_no])*np.sqrt(self.var_y[prs_no])
-                    denom = self.var_y[prs_no]*(1 - test_r2_anc[prs_no, chr_no]**2) ## correction 1
+                    # denom = self.var_y[prs_no]*(1 - test_r2_anc[prs_no, chr_no]**2) ## correction 1
+                    denom = test_r2_anc[prs_no, chr_no]
                     neff[chr_no, prs_no] = num*correction_relatives[prs_no]/denom
             
             pd.DataFrame(data = neff.T, columns = np.array(self.unique_chr_map, dtype='int')).to_csv(out + '.neff', sep = ' ', index=None)
@@ -1150,8 +1151,8 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         spike = (
             torch.clamp(
                 trainer.model_list[best_alpha[prs_no]].sc1.spike1[prs_no],
-                1e-6,
-                1.0 - 1e-6,
+                1e-4,
+                1.0 - 1e-4,
             )
             # .cpu()
             # .detach()
@@ -1340,7 +1341,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     if args.predBetasFlag: num_chr += 1
     
-    ### caution: turn off transfer learning
+    ### caution: turn off transfer learning for spike
     model_list = initialize_model(
         alpha,
         std_genotype,
