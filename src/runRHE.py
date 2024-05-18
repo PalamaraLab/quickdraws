@@ -316,7 +316,7 @@ def runRHE(
             covariates_df = pd.merge(covariates_df, pheno_df)[covar_df_cols]
             covariates_df.to_csv(out + ".rhe.covars", sep="\t", index=None, na_rep="NA")
             cmd += " -c " + out + ".rhe.covars"
-        cmd += " -k " + str(random_vectors) + " -jn " + str(jn) + " > " + savelog
+        cmd += " -k " + str(random_vectors) + " -jn " + str(jn) + " -m G > " + savelog
         logging.info("Invoking RHE as: " + str(cmd))
         _ = subprocess.run(cmd, shell=True)
 
@@ -326,7 +326,7 @@ def runRHE(
         with open(savelog, "r") as f:
             for line in f.readlines():
                 if "Sigma^2" in line:
-                    VC_phen.append(float(line.split(":")[1].split(" ")[1]))
+                    VC_phen.append(float(line.split(":")[1].split("SE")[0].split(" ")[1]))
                 if "Sigma^2_e" in line:
                     VC.append(VC_phen)
                     VC_phen = []

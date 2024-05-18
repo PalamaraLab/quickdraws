@@ -31,7 +31,7 @@ import logging
 from correct_for_relatives import get_correction_for_relatives
 
 logger = logging.getLogger(__name__)
-# torch._dynamo.config.cache_size_limit = 32
+# torch._dynamo.config.cache_size_limit = 1024
 
 if torch.cuda.is_available():
     import bitsandbytes as bnb
@@ -426,7 +426,7 @@ class Trainer:
         self.var_covar_effect = torch.std(train_dataset.covar_effect, axis=0).float().to(device)**2
         if args.binary:
             self.var_covar_effect = torch.std(torch.sigmoid(train_dataset.covar_effect), axis=0).float().to(device)**2
-        self.var_y = torch.std(train_dataset.output, axis=0).numpy()
+        self.var_y = torch.std(train_dataset.output, axis=0).numpy()**2
         if self.chr_map is not None:
             self.unique_chr_map = torch.unique(self.chr_map).tolist()
             ## check if chr_map has chrs in chunks:
@@ -535,7 +535,7 @@ class Trainer:
     '''
     def get_chr_r2(self, beta):
         with torch.no_grad():
-            var = np.zeros((beta.shape[1], self.num_chr))
+            var = np.zeros((beta.shape[0], self.num_chr))
             '''
             Loops through each chromosome in self.unique_chr_map. 
             For each chromosome, the function prepares to collect model predictions (preds_arr_chr) and actual labels (labels_arr) across the entire test dataset.
@@ -570,7 +570,14 @@ class Trainer:
                 (excluding those on the current chromosome) predict the phenotype.
                 '''
                 for prs_no in range(beta.shape[0]):
-                    var[prs_no, chr_no] = np.std(labels_arr[:, prs_no] - preds_arr_chr[:, prs_no])**2 #stats.pearsonr(preds_arr_chr[:, prs_no], labels_arr[:, prs_no])[0]
+                    if self.args.binary:
+                        ### In low prevalence binary traits, the variance of the phenotype can be subs. diff in train and test split
+                        ### We therefore only use the R calc. on test set, we calc. the residual variance on the train set which is closer to the full dataset
+                        r = stats.pearsonr(preds_arr_chr[:, prs_no], labels_arr[:, prs_no])[0]
+                        # var[prs_no, chr_no] = self.var_y[prs_no] + np.std(preds_arr_chr[:, prs_no])**2 - 2*r*np.std(preds_arr_chr[:, prs_no])*np.sqrt(self.var_y[prs_no])
+                        var[prs_no, chr_no] = self.var_y[prs_no]*(1 - r**2)
+                    else:
+                        var[prs_no, chr_no] = np.std(labels_arr[:, prs_no] - preds_arr_chr[:, prs_no])**2
         
         return var
 
@@ -1151,8 +1158,8 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
         spike = (
             torch.clamp(
                 trainer.model_list[best_alpha[prs_no]].sc1.spike1[prs_no],
-                1e-4,
-                1.0 - 1e-4,
+                1e-6,
+                1.0 - 1e-6,
             )
             # .cpu()
             # .detach()
@@ -1267,6 +1274,16 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     if args.lowmem:
         train_dataset.close_hdf5()
         test_dataset.close_hdf5()
+
+    # np.savetxt(args.out + ".step1.output_r2", output_r2)
+    # np.savetxt(args.out + ".step1.mu", mu)
+    # np.savetxt(args.out + ".step1.spike", spike)
+    # np.savetxt(args.out + ".step1.r2_best", r2_best)
+
+    # output_r2 = np.loadtxt(args.out + ".step1.output_r2")
+    # mu = np.loadtxt(args.out + ".step1.mu")
+    # spike = np.loadtxt(args.out + ".step1.spike")
+    # r2_best = np.loadtxt(args.out + ".step1.r2_best")
 
     np.savetxt(args.out + ".alpha", np.array(alpha)[np.argmax(output_r2, axis=1)])
     if args.h2_grid:

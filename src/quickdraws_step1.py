@@ -83,7 +83,7 @@ parser.add_argument(
 parser.add_argument(
     "--rhemc",
     type=str,
-    default=str(Path(os.path.dirname(os.path.abspath(__file__)),"RHEmcmt")),
+    default=str(Path(os.path.dirname(os.path.abspath(__file__)),"GENIE_multi_pheno")),
     help="path to RHE-MCMT binary file",
 )
 parser.add_argument("--out_step0", help="prefix of the output files from step 0", type=str) ## depreciate
