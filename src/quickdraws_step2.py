@@ -521,7 +521,7 @@ if __name__ == "__main__":
         level=logging.INFO,
         format="%(message)s",
         handlers=[
-            logging.FileHandler(args.out + ".log"),
+            logging.FileHandler(args.out + ".log", "w", "utf-8"),
             logging.StreamHandler()
         ]
     )
