@@ -1,4 +1,4 @@
-name: "Tests on Ubuntu"
+name: "Test package"
 
 on:
   push:
@@ -10,14 +10,13 @@ on:
 
 jobs:
   build-and-test:
-    name: Tests on Ubuntu
-    runs-on: ubuntu-24.04
+    name: Tests example and packaging
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python: "3.9"
-          - python: "3.12"
+        python: ["3.9", "3.12"]
+        os: ["ubuntu-24.04"]
 
     steps:
       - name: checkout repo
@@ -38,7 +37,7 @@ jobs:
       - name: run python example
         run: |
           chmod +x run_example.sh
-          ./run_example.sh
+          poetry run ./run_example.sh
         shell: bash
 
       - name: check dist builds
