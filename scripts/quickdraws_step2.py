@@ -23,15 +23,13 @@ import logging
 from datetime import datetime
 from art import text2art
 import copy
-from tqdm import tqdm
 
-from custom_linear_regression import (
-    get_unadjusted_test_statistics,
+from quickdraws import (
     get_unadjusted_test_statistics_bgen,
-    preprocess_covars
+    get_unadjusted_test_statistics,
+    preprocess_covars,
+    preprocess_phenotypes,
 )
-from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
-import pdb
 
 def make_sure_path_exists(path):
     try:
@@ -46,16 +44,16 @@ def preprocess_offsets(offsets, sample_file=None, weights=None, is_loco_file=Fal
     if is_loco_file:
         df_concat = offsets
     else:
-        df_concat = pd.read_csv(offsets, sep="\s+")
+        df_concat = pd.read_csv(offsets, sep=r'\s+')
     pheno_columns = df_concat.columns.tolist().copy()
     if sample_file is not None:
-        sample_file = pd.read_csv(sample_file, sep="\s+")
+        sample_file = pd.read_csv(sample_file, sep=r'\s+')
         sample_file = sample_file.rename(columns={"ID_1": "FID", "ID_2": "IID"})
         sample_file[["FID", "IID"]] = sample_file[["FID", "IID"]].astype("int")
         df_concat = pd.merge(df_concat, sample_file, on=["FID", "IID"])
         df_concat = df_concat[pheno_columns]
     if weights is not None:
-        weights_file = pd.read_csv(weights, sep="\s+")
+        weights_file = pd.read_csv(weights, sep=r'\s+')
         weights_file = weights_file.rename(columns={"ID_1": "FID", "ID_2": "IID"})
         weights_file[["FID", "IID"]] = weights_file[["FID", "IID"]].astype("int")
         df_concat = pd.merge(df_concat, weights_file, on=["FID", "IID"])
@@ -227,9 +225,9 @@ def get_test_statistics(
 
     traits = preprocess_offsets(phenofile, weights)
     pheno_columns = traits.columns.tolist()
-    covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
+    covar_effects = pd.read_csv(covareffectsfile, sep=r'\s+')
     # neff = np.loadtxt(offset + '.step1.neff')
-    neff = pd.read_csv(offset + '.neff', sep='\s+')
+    neff = pd.read_csv(offset + '.neff', sep=r'\s+')
     logging.info("Using estimated effective sample fize from file specified in: " + str(offset) + '.neff')
     
     if weights is None:
@@ -356,7 +354,7 @@ def get_test_statistics_bgen(
     traits = preprocess_offsets(phenofile, samplefile, weights)
     pheno_columns = traits.columns.tolist()
 
-    covar_effects = pd.read_csv(covareffectsfile, sep="\s+")
+    covar_effects = pd.read_csv(covareffectsfile, sep=r'\s+')
     offset_list_pre = load_offsets(offset, pheno_columns, unique_chrs, covar_effects) 
     covar_effects = preprocess_offsets(covareffectsfile, samplefile, weights)
 
@@ -423,7 +421,7 @@ def get_test_statistics_bgen(
     logging.info("Summary stats stored as: " + str(out) + ".{pheno}.sumstats{.gz}")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bed", "-g", help="prefix for bed/bim/fam files", type=str)
     parser.add_argument("--out_step1", help="Filename of the offsets file", type=str)
@@ -598,3 +596,7 @@ if __name__ == "__main__":
     logging.info("")
     logging.info("#### End Time: " + str(datetime.today().strftime('%Y-%m-%d %H:%M:%S')) + " ####")
     logging.info("")
+
+
+if __name__ == "__main__":
+    main()
