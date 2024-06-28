@@ -37,7 +37,9 @@ jobs:
 
       - name: run python example
         run: |
+          chmod +x run_example.sh
           ./run_example.sh
+        shell: bash
 
       - name: check dist builds
         run: |
