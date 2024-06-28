@@ -241,7 +241,7 @@ if __name__ == "__main__":
     import glob
 
     bed = "/well/palamara/users/vnk166/workspace/meta_learning_prs/simulate/sim_400k/genotype_400k"
-    ldscores = pd.read_csv("/well/palamara/users/vnk166/workspace/quickdraws/LDSCORE.1000G_EUR.tab.gz", sep="\s+")
+    ldscores = pd.read_csv("/well/palamara/users/vnk166/workspace/quickdraws/LDSCORE.1000G_EUR.tab.gz", sep=r'\s+')
     for name in np.sort(glob.glob("/well/palamara/users/vnk166/workspace/quickdraws/sim_400k/qt_10000.*sumstats.gz")):
         if 'processed' in name:
             continue

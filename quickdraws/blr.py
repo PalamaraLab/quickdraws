@@ -28,7 +28,7 @@ import gc
 import pdb
 import logging
 
-from correct_for_relatives import get_correction_for_relatives
+from .correct_for_relatives import get_correction_for_relatives
 
 logger = logging.getLogger(__name__)
 # torch._dynamo.config.cache_size_limit = 1024
@@ -1408,7 +1408,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## Calculate correction for relatives
     if args.kinship is not None:
-        kinship = pd.read_csv(args.kinship, sep='\s+')
+        kinship = pd.read_csv(args.kinship, sep=r'\s+')
         h2 = h2.numpy()
         if args.binary:
             ## convert from liability to observed scale

@@ -26,12 +26,12 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, hdf5=None, phen_t
     samples_geno = [int(x) for x in snp_on_disk.iid[:, 0]]
 
     if keepfile is not None:
-        keep_samples = pd.read_csv(keepfile, sep="\s+")
+        keep_samples = pd.read_csv(keepfile, sep=r'\s+')
         keep_samples = [int(x) for x in keep_samples[keep_samples.columns[0]]]
         samples_geno = list(np.intersect1d(samples_geno, keep_samples))
 
     # Phenotype loading and alignment
-    Traits = pd.read_csv(pheno, sep="\s+", low_memory=False)
+    Traits = pd.read_csv(pheno, sep=r'\s+', low_memory=False)
     
     if hdf5 is not None:
         ### If HDF5 present and has all samples then keep the order in HDF5
@@ -101,7 +101,7 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, hdf5=None, phen_t
     ### covariate adjustment
     if covar is not None:
         if log: logging.info("Loading and preparing covariates...")
-        df_covar = pd.read_csv(covar, sep="\s+", low_memory=False)
+        df_covar = pd.read_csv(covar, sep=r'\s+', low_memory=False)
         covar_columns = df_covar.columns[2:]
         merged_df = pd.merge(Traits.reset_index(drop=True), df_covar)
 
@@ -198,7 +198,7 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
 
     if unrel_homo_samples is not None:
         unrel_homo_samples = pd.read_csv(
-            unrel_homo_samples, sep="\s+", names=["FID", "IID"]
+            unrel_homo_samples, sep=r'\s+', names=["FID", "IID"]
         )
         unrel_homo_samples = pd.merge(Trait, unrel_homo_samples, on=["FID", "IID"])
         unrel_sample_list = unrel_homo_samples.FID.tolist()
