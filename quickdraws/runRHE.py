@@ -11,8 +11,9 @@ import random
 import gc
 import numba
 
-from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
-from blr import str_to_bool
+from rhe import run_genie_multi_pheno
+
+from .blr import str_to_bool
 from scipy.stats import norm
 import logging
 logger = logging.getLogger(__name__)
@@ -112,11 +113,11 @@ def make_ldscore_inner(geno, pos, mask_dodgy_snp, chr_map, outlier_window, num_s
 def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_percentiles, outfile=None):
     logging.info("Making annotation for accurate h2 estimation")
     if maf_ldscores is not None:
-        df = pd.read_csv(maf_ldscores, sep="\s+")
+        df = pd.read_csv(maf_ldscores, sep=r'\s+')
     else:
         df = calc_ldscore_chip(bed)
 
-    bim = pd.read_csv(bed + ".bim", header=None, sep="\s+")
+    bim = pd.read_csv(bed + ".bim", header=None, sep=r'\s+')
     bim = bim.rename(columns={0:'CHR',1:'SNP'})
     dtype = dict(CHR=str, SNP=str)
     df = pd.merge(bim.astype(dtype), df.astype(dtype), on=['CHR','SNP'], how='left')
@@ -175,7 +176,7 @@ def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_
         total_snps = snp_on_disk.sid_count
         snp_mask = np.ones(total_snps, dtype="bool")
     else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+')
         snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
         snp_dict = {}
         total_snps = snp_on_disk.sid_count
@@ -199,7 +200,7 @@ def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
     if snps_to_keep_filename is None:
         snp_mask = np.ones(M, dtype="bool")
     else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+')
         snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
         snp_dict = {}
         snp_mask = np.zeros(M, dtype="bool")
@@ -214,7 +215,7 @@ def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
         sdata,
         count_A1=False,
     )
-    bim_file = pd.read_csv(bedfile + ".bim", sep="\s+", header=None)
+    bim_file = pd.read_csv(bedfile + ".bim", sep=r'\s+', header=None)
     bim_file.loc[snp_mask].to_csv(
         bedfile + ".common.bim", sep="\t", index=None, header=None
     )
@@ -231,7 +232,7 @@ def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
         )
         logging.info("Invoking SCORE as", cmd)
         _ = subprocess.run(cmd, shell=True)
-    N_phen = pd.read_csv(pheno, sep="\s+").shape[1] - 2
+    N_phen = pd.read_csv(pheno, sep=r'\s+').shape[1] - 2
     VC_full = np.zeros((N_phen, N_phen))
     with open(out, "r") as f:
         for line in f.readlines():
@@ -273,7 +274,7 @@ def runRHE(
     if snps_to_keep_filename is None:
         snp_mask = np.ones(M, dtype="bool")
     else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+')
         snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
         snp_dict = {}
         snp_mask = np.zeros(M, dtype="bool")
@@ -285,7 +286,7 @@ def runRHE(
     if annotation is not None:
         # we assume the annotation exists already and infer K
         logging.info("Opening annotation file provided, doing MC GWAS")
-        table = pd.read_csv(annotation, sep="\s+", header=None)
+        table = pd.read_csv(annotation, sep=r'\s+', header=None)
         K = table.shape[1]
         assert table.shape[0] == M
     else:
@@ -300,7 +301,7 @@ def runRHE(
         table.to_csv(out + ".random.annot", header=None, index=None, sep=" ")
         annotation = out + ".random.annot"
 
-    N_phen = pd.read_csv(pheno, sep="\s+").shape[1] - 2
+    N_phen = pd.read_csv(pheno, sep=r'\s+').shape[1] - 2
 
     if random_vectors < N_phen:
         logging.exception("Supply more random vectors than the phenotypes being analyzed")
@@ -308,17 +309,17 @@ def runRHE(
 
     # now run RHE
     if True:
-        cmd = rhemc + " -g " + bedfile + " -p " + pheno + " -annot " + annotation
+        cmd = " -g " + bedfile + " -p " + pheno + " -annot " + annotation
         if covariates is not None:
-            pheno_df = pd.read_csv(pheno, sep="\s+")
-            covariates_df = pd.read_csv(covariates, sep="\s+")
+            pheno_df = pd.read_csv(pheno, sep=r'\s+')
+            covariates_df = pd.read_csv(covariates, sep=r'\s+')
             covar_df_cols = covariates_df.columns.tolist()
             covariates_df = pd.merge(covariates_df, pheno_df)[covar_df_cols]
             covariates_df.to_csv(out + ".rhe.covars", sep="\t", index=None, na_rep="NA")
             cmd += " -c " + out + ".rhe.covars"
-        cmd += " -k " + str(random_vectors) + " -jn " + str(jn) + " -m G > " + savelog
-        logging.info("Invoking RHE as: " + str(cmd))
-        _ = subprocess.run(cmd, shell=True)
+        cmd += f' -k {random_vectors} -jn {jn} -m G -o {savelog}'
+        logging.info("Invoking RHE as: GENIE_multi_pheno " + str(cmd))
+        _ = run_genie_multi_pheno(cmd)
 
     if os.path.isfile(savelog):
         VC = []
@@ -338,7 +339,7 @@ def runRHE(
 
         if binary:
             ## transform heritability from observed scale to liability scale
-            pheno_df = pd.read_csv(pheno, sep="\s+")
+            pheno_df = pd.read_csv(pheno, sep=r'\s+')
             for pheno in range(len(VC)):
                 prev = pheno_df.values[:, 2 + pheno].mean()
                 z = norm.pdf(norm.ppf(1 - prev))
