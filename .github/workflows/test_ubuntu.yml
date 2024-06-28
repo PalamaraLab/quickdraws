@@ -1,0 +1,44 @@
+name: "Tests on Ubuntu"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build-and-test:
+    name: Tests on Ubuntu
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.9"
+          - python: "3.12"
+
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: install poetry
+        run: |
+          pipx install poetry
+
+      - name: install python module
+        run: |
+          poetry install
+
+      - name: run python example
+        run: |
+          ./run_example.sh
+
+      - name: check dist builds
+        run: |
+          poetry build
