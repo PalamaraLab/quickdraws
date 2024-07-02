@@ -30,8 +30,8 @@ pip = ">=23"
 setuptools = ">=68"
 
 [tool.poetry.scripts]
-quickdraws-step-1 = "scripts.quickdraws_step1:main"
-quickdraws-step-2 = "scripts.quickdraws_step2:main"
+quickdraws-step-1 = "quickdraws.scripts.quickdraws_step1:main"
+quickdraws-step-2 = "quickdraws.scripts.quickdraws_step2:main"
 
 [build-system]
 requires = ["poetry-core"]
