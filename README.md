@@ -1,18 +1,22 @@
 # Quickdraws #
 
-## Installation (uses conda) ##
+## Installation (pip)
+
+It is recommended to create a virtual environment.
+First, install the appropriate cuda-enabled version of PyTorch, e.g.:
+
 ```
-conda create -n qd python=3.9 -y
-conda activate qd
-cd quickdraws/
-pip install torch==2.2.1 --index-url https://download.pytorch.org/whl/cu118
-python3.9 -m pip install -r requirements.txt
-chmod +x src/RHEmcmt 
+pip3 install torch --index-url https://download.pytorch.org/whl/cu118
+```
+
+Then, install Quickdraws:
+
+```
+pip install quickdraws
 ```
 
 ## Running example ##
 ```
-mkdir output
 bash run_example.sh
 ```
 
