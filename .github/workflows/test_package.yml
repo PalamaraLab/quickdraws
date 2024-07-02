@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.9", "3.12"]
-        os: ["ubuntu-24.04", "macos-13", "macos-14"]
+        os: ["ubuntu-24.04"]
 
     steps:
       - name: checkout repo
@@ -43,3 +43,9 @@ jobs:
       - name: check dist builds
         run: |
           poetry build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: ./dist/*
+          retention-days: 1

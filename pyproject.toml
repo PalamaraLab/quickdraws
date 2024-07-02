@@ -23,16 +23,11 @@ bitsandbytes = "*"
 pybgen = "*"
 art = "*"
 rhe = "==1.0.0"
-torch = { version = "2.2.1", source = "pytorch-cu118" }
+torch = "2.*"
 
 [tool.poetry.dev-dependencies]
 pip = ">=23"
 setuptools = ">=68"
-
-[[tool.poetry.source]]
-name = "pytorch-cu118"
-url = "https://download.pytorch.org/whl/cu118"
-priority = "explicit"
 
 [tool.poetry.scripts]
 quickdraws-step-1 = "scripts.quickdraws_step1:main"
