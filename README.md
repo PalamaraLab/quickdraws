@@ -47,7 +47,7 @@ bash run_example.sh
 
 
 ## Documentation
-See https://github.com/PalamaraLab/quickdraws/wiki/Quickdraws
+See https://github.com/PalamaraLab/quickdraws/wiki/Quickdraws-GWAS-Software-Documentation
 
 
 ## Contact information
