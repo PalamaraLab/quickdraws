@@ -1,4 +1,22 @@
-## Convert .Bed to .HDF5 file  (saving mean, std genotype, phenotypes and chr_map seperately)
+# This file is part of the Quickdraws GWAS software suite.
+#
+# Copyright (C) 2024 Quickdraws Developers
+#
+# Quickdraws is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Quickdraws is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Quickdraws. If not, see <http://www.gnu.org/licenses/>.
+
+
+# Convert .Bed to .HDF5 file  (saving mean, std genotype, phenotypes and chr_map seperately)
 import pandas as pd
 from pysnptools.snpreader import Bed
 import h5py
@@ -11,7 +29,8 @@ import pdb
 import numba
 import os
 
-from preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
+from .preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -40,7 +59,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=512,
     if covars is None:
         covars = np.ones((len(sample_indices), 1), dtype='float32')
     else:
-        df_covar = pd.read_csv(covars, sep="\s+")
+        df_covar = pd.read_csv(covars, sep=r'\s+')
         df_covar = pd.merge(
             pd.DataFrame(snp_on_disk.iid[:, 0].astype("int"), columns=["FID"]),
             df_covar,
@@ -83,8 +102,8 @@ def convert_to_hdf5(
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
 
     ## handle phenotypes here
-    pheno = pd.read_csv(out + ".traits", sep="\s+")
-    covareffect = pd.read_csv(out + ".covar_effects", sep="\s+")
+    pheno = pd.read_csv(out + ".traits", sep=r'\s+')
+    covareffect = pd.read_csv(out + ".covar_effects", sep=r'\s+')
     snp_on_disk = Bed(bed, count_A1=True)
 
     ##Count total SNPs
@@ -92,7 +111,7 @@ def convert_to_hdf5(
         total_snps = snp_on_disk.sid_count
         snp_mask = np.ones(total_snps, dtype="bool")
     else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+')
         snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
         snp_dict = {}
         total_snps = snp_on_disk.sid_count
@@ -213,7 +232,7 @@ def make_master_hdf5(
         total_snps = snp_on_disk.sid_count
         snp_mask = np.ones(total_snps, dtype="bool")
     else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+')
         snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
         snp_dict = {}
         total_snps = snp_on_disk.sid_count

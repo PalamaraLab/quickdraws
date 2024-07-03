@@ -1,12 +1,28 @@
+# This file is part of the Quickdraws GWAS software suite.
+#
+# Copyright (C) 2024 Quickdraws Developers
+#
+# Quickdraws is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Quickdraws is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Quickdraws. If not, see <http://www.gnu.org/licenses/>.
+
+
 import os
 from pysnptools.snpreader import Bed
 import pandas as pd
 import numpy as np
 import h5py
 import argparse
-import time
 from joblib import Parallel, delayed
-import pdb
 
 
 def preprocess_bedfile(bedFile, sample_indices, snps_to_keep_filename, chr_map=None):
@@ -15,7 +31,7 @@ def preprocess_bedfile(bedFile, sample_indices, snps_to_keep_filename, chr_map=N
         total_snps = snp_on_disk.sid_count
         snp_mask = np.ones(total_snps, dtype="bool")
     else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+")
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+')
         snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
         snp_dict = {}
         total_snps = snp_on_disk.sid_count
@@ -140,10 +156,10 @@ def cavi_spike_slab(
 
 def cavi_on_svi_chr(args, h2, alpha, hdf5_filename, chr_map, c):
     mu_blr = pd.read_csv(
-        args.output + "loco_chr" + str(int(c)) + ".mu", sep="\s+"
+        args.output + "loco_chr" + str(int(c)) + ".mu", sep=r'\s+'
     ).values
     psi_blr = pd.read_csv(
-        args.output + "loco_chr" + str(int(c)) + ".psi", sep="\s+"
+        args.output + "loco_chr" + str(int(c)) + ".psi", sep=r'\s+'
     ).values
     y_resid = cavi_spike_slab(
         args, h2, alpha, hdf5_filename, mu_blr, psi_blr, chr_map != c

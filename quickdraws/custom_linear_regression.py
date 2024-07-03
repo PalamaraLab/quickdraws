@@ -1,3 +1,21 @@
+# This file is part of the Quickdraws GWAS software suite.
+#
+# Copyright (C) 2024 Quickdraws Developers
+#
+# Quickdraws is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Quickdraws is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Quickdraws. If not, see <http://www.gnu.org/licenses/>.
+
+
 import numpy as np
 import pandas as pd
 from pysnptools.snpreader import Bed
@@ -9,16 +27,18 @@ import numba
 import copy
 import time
 import pdb
-from firth_logistic import firth_logit_covars, firth_logit_svt
 from scipy.special import expit
 from joblib import Parallel, delayed
 import os
+
+from .firth_logistic import firth_logit_covars, firth_logit_svt
+
 
 def preprocess_covars(covarFile, iid_fid):
     if covarFile is None:
         covars = np.ones((len(iid_fid),1), dtype='float32')
         return covars
-    covars = pd.read_csv(covarFile, sep="\s+")
+    covars = pd.read_csv(covarFile, sep=r'\s+')
     covars = pd.merge(
         pd.DataFrame(iid_fid.astype("int"), columns=["FID", "IID"]),
         covars,
@@ -34,7 +54,7 @@ def preprocess_covars(covarFile, iid_fid):
 def write_sumstats_file(bedFile, pheno_names, num_samples, afreq, beta, chisq, firth_arr, out):
     bim = pd.read_csv(
         bedFile + ".bim",
-        sep="\s+",
+        sep=r'\s+',
         header=None,
         names=["CHR", "SNP", "GENPOS", "POS", "A1", "A2"],
     )
@@ -103,7 +123,7 @@ def write_sumstats_file_bgen(
 
 def check_residuals_same_order(residualFileList):
     for chr_no in range(len(residualFileList)):
-        df = pd.read_csv(residualFileList[chr_no], sep="\s+")
+        df = pd.read_csv(residualFileList[chr_no], sep=r'\s+')
         if chr_no == 0:
             iid = df.IID.values
         else:
@@ -420,7 +440,7 @@ def get_unadjusted_test_statistics_bgen(
         total_snps = snp_on_disk.sid_count
         snp_mask = np.ones(total_snps, dtype="bool")
     else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep="\s+", names=["SNP"])
+        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+', names=["SNP"])
         snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
         snp_dict = {}
         total_snps = snp_on_disk.sid_count

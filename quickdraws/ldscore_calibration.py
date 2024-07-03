@@ -1,3 +1,21 @@
+# This file is part of the Quickdraws GWAS software suite.
+#
+# Copyright (C) 2024 Quickdraws Developers
+#
+# Quickdraws is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Quickdraws is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Quickdraws. If not, see <http://www.gnu.org/licenses/>.
+
+
 """
 Custom script to perform weighted LD-score regression as in BOLT-LMM
 Note: we assume and use base pair location instead of genetic position 
@@ -241,7 +259,7 @@ if __name__ == "__main__":
     import glob
 
     bed = "/well/palamara/users/vnk166/workspace/meta_learning_prs/simulate/sim_400k/genotype_400k"
-    ldscores = pd.read_csv("/well/palamara/users/vnk166/workspace/quickdraws/LDSCORE.1000G_EUR.tab.gz", sep="\s+")
+    ldscores = pd.read_csv("/well/palamara/users/vnk166/workspace/quickdraws/LDSCORE.1000G_EUR.tab.gz", sep=r'\s+')
     for name in np.sort(glob.glob("/well/palamara/users/vnk166/workspace/quickdraws/sim_400k/qt_10000.*sumstats.gz")):
         if 'processed' in name:
             continue

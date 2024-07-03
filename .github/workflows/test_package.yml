@@ -1,0 +1,55 @@
+name: "Test package"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build-and-test:
+    name: Tests example and packaging
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+        os: ["ubuntu-24.04"]
+
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: install poetry
+        run: |
+          pipx install poetry
+
+      - name: install cuda-enabled torch
+        run: |
+          poetry run pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+      - name: install python module
+        run: |
+          poetry install
+
+      - name: run python example
+        run: |
+          chmod +x run_example.sh
+          poetry run ./run_example.sh
+        shell: bash
+
+      - name: check dist builds
+        run: |
+          poetry build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.python }}-${{ matrix.os }}
+          path: ./dist/*
+          retention-days: 1

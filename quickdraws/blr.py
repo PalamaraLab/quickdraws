@@ -1,3 +1,21 @@
+# This file is part of the Quickdraws GWAS software suite.
+#
+# Copyright (C) 2024 Quickdraws Developers
+#
+# Quickdraws is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Quickdraws is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Quickdraws. If not, see <http://www.gnu.org/licenses/>.
+
+
 import pprint
 import random
 from pathlib import Path
@@ -28,7 +46,7 @@ import gc
 import pdb
 import logging
 
-from correct_for_relatives import get_correction_for_relatives
+from .correct_for_relatives import get_correction_for_relatives
 
 logger = logging.getLogger(__name__)
 # torch._dynamo.config.cache_size_limit = 1024
@@ -1408,7 +1426,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## Calculate correction for relatives
     if args.kinship is not None:
-        kinship = pd.read_csv(args.kinship, sep='\s+')
+        kinship = pd.read_csv(args.kinship, sep=r'\s+')
         h2 = h2.numpy()
         if args.binary:
             ## convert from liability to observed scale
