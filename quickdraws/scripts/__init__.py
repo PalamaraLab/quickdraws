@@ -1,6 +1,6 @@
-# This file is part of Quickdraws, developed by the Palamara Lab.
+# This file is part of the Quickdraws GWAS software suite.
 #
-# Copyright (C) 2024 University of Oxford
+# Copyright (C) 2024 Quickdraws Developers
 #
 # Quickdraws is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,9 +22,9 @@ def get_copyright_string():
 | |_| || |_| || || (__ |   < | (_| || |   | (_| | \ V  V / \__ \
  \__\_\ \__,_||_| \___||_|\_\ \__,_||_|    \__,_|  \_/\_/  |___/
                                                                 
-Developed by Hrushikesh Loya and Pier Palamara of the Palamara Lab.
+Developed by Hrushikesh Loya and Pier Palamara.
 
-Copyright (C) 2024 University of Oxford
+Copyright (C) 2024 Quickdraws Developers
 
 Quickdraws is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

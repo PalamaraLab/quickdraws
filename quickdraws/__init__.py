@@ -1,6 +1,6 @@
-# This file is part of Quickdraws, developed by the Palamara Lab.
+# This file is part of the Quickdraws GWAS software suite.
 #
-# Copyright (C) 2024 University of Oxford
+# Copyright (C) 2024 Quickdraws Developers
 #
 # Quickdraws is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
