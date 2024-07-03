@@ -36,7 +36,7 @@ pip install quickdraws
 
 ## Running example
 
-Once you install `quickdraws`, two executables should be available in your path: `quickdraws_step1` and `quickdraws_step2`.
+Once you install `quickdraws`, two executables should be available in your path: `quickdraws-step-1` and `quickdraws-step-2`.
 Clone the Git repository to access the example data and script demonstrating how these can be used:
 
 ```
