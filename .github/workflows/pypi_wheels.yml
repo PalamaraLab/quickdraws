@@ -1,0 +1,43 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+
+jobs:
+  publish_wheels:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+
+    if: ${{ github.repository == 'PalamaraLab/quickdraws' }}
+
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: install poetry
+        run: |
+          pipx install poetry
+
+      - name: install dependencies
+        run: |
+          poetry install
+
+      - name: build package
+        run: |
+          poetry build
+
+      - name: Verify distribution files
+        run: ls -l dist/
+
+#      - name: Publish to PyPI
+#        env:
+#          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
+#        run: poetry publish
