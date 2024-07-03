@@ -37,7 +37,7 @@ jobs:
       - name: Verify distribution files
         run: ls -l dist/
 
-#      - name: Publish to PyPI
-#        env:
-#          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
-#        run: poetry publish
+      - name: Publish to PyPI
+        env:
+          POETRY_PYPI_TOKEN_PYPI: ${{ secrets.PYPI_TOKEN }}
+        run: poetry publish
