@@ -39,7 +39,6 @@ from scipy.special import expit
 import warnings
 import logging
 from datetime import datetime
-from art import text2art
 import copy
 
 from quickdraws import (
@@ -48,6 +47,9 @@ from quickdraws import (
     preprocess_covars,
     preprocess_phenotypes,
 )
+
+from quickdraws.scripts import get_copyright_string
+
 
 def make_sure_path_exists(path):
     try:
@@ -541,9 +543,8 @@ def main():
             logging.StreamHandler()
         ]
     )
-    logging.info(text2art("Quickdraws"))
-    logging.info("Copyright (c) 2024 Hrushikesh Loya and Pier Palamara.")
-    logging.info("Distributed under the GPLv3 License.")
+
+    logging.info(get_copyright_string())
     logging.info("")
     logging.info("Logs saved in: " + str(args.out + ".log"))
     logging.info("")

@@ -24,12 +24,12 @@ import time
 import h5py
 import logging
 from datetime import datetime
-from art import text2art
 import warnings
 from pathlib import Path
 import pandas as pd 
 from pysnptools.snpreader import Bed
 
+import quickdraws.scripts
 from quickdraws import (
     preprocess_phenotypes,
     PreparePhenoRHE,
@@ -39,6 +39,8 @@ from quickdraws import (
     blr_spike_slab,
     str_to_bool
 )
+
+from quickdraws.scripts import get_copyright_string
 
 
 def make_sure_path_exists(path):
@@ -258,9 +260,7 @@ def main():
         ]
     )
 
-    logging.info(text2art("Quickdraws"))
-    logging.info("Copyright (c) 2024 Hrushikesh Loya and Pier Palamara.")
-    logging.info("Distributed under the GPLv3 License.")
+    logging.info(get_copyright_string())
     logging.info("")
     logging.info("Logs saved in: " + str(args.out + ".log"))
     logging.info("")
