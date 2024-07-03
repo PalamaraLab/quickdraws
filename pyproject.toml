@@ -21,7 +21,6 @@ wandb = "*"
 tables = "*"
 bitsandbytes = "*"
 pybgen = "*"
-art = "*"
 rhe = "==1.0.0"
 torch = { version = "2.*", source = "pytorch-cu118" }
 
