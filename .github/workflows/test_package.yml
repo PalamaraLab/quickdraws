@@ -30,6 +30,10 @@ jobs:
         run: |
           pipx install poetry
 
+      - name: install cuda-enabled torch
+        run: |
+          poetry run pip install torch --index-url https://download.pytorch.org/whl/cu118
+
       - name: install python module
         run: |
           poetry install
