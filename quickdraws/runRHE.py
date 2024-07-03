@@ -211,61 +211,6 @@ def MakeAnnotation(bed, maf_ldscores, snps_to_keep_filename, maf_bins, ld_score_
     np.savetxt(outfile, tot_cats, fmt="%d")
     return
 
-def runSCORE(bedfile, pheno, snps_to_keep_filename, score, out="out"):
-    snp_on_disk = Bed(bedfile, count_A1=True)
-    _, M = snp_on_disk.shape  # get the number of SNPs
-
-    if snps_to_keep_filename is None:
-        snp_mask = np.ones(M, dtype="bool")
-    else:
-        snps_to_keep = pd.read_csv(snps_to_keep_filename, sep=r'\s+')
-        snps_to_keep = snps_to_keep[snps_to_keep.columns[0]].values
-        snp_dict = {}
-        snp_mask = np.zeros(M, dtype="bool")
-        for snp_no, snp in enumerate(snp_on_disk.sid):
-            snp_dict[snp] = snp_no
-        for snp in snps_to_keep:
-            snp_mask[snp_dict[snp]] = True
-
-    sdata = snp_on_disk[:, snp_mask].read(dtype="float32")
-    Bed.write(
-        bedfile + ".common.bed",
-        sdata,
-        count_A1=False,
-    )
-    bim_file = pd.read_csv(bedfile + ".bim", sep=r'\s+', header=None)
-    bim_file.loc[snp_mask].to_csv(
-        bedfile + ".common.bim", sep="\t", index=None, header=None
-    )
-
-    if not os.path.isfile(out):
-        cmd = (
-            score
-            + " -mpheno 3,4 -g "
-            + bedfile
-            + ".common -p "
-            + pheno
-            + " -o "
-            + str(out)
-        )
-        logging.info("Invoking SCORE as", cmd)
-        _ = subprocess.run(cmd, shell=True)
-    N_phen = pd.read_csv(pheno, sep=r'\s+').shape[1] - 2
-    VC_full = np.zeros((N_phen, N_phen))
-    with open(out, "r") as f:
-        for line in f.readlines():
-            if "Vg/Vp(" in line:
-                phen_no = int(line.split("(")[1].split(")")[0])
-                VC_full[phen_no, phen_no] = float(line.split("\t")[1])
-            elif "rho_g(" in line:
-                phen_no1 = int(line.split("(")[1].split(",")[0])
-                phen_no2 = int(line.split("(")[1].split(")")[0].split(",")[1])
-                VC_full[phen_no1, phen_no2] = float(line.split("\t")[1])
-                VC_full[phen_no2, phen_no1] = float(line.split("\t")[1])
-    logging.info("The genetic covariance matrix inferred from SCORE: " + str(VC_full))
-    np.savetxt(out + ".h2", VC_full)
-    return VC_full
-
 
 def runRHE(
     bedfile,
