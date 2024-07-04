@@ -49,6 +49,8 @@ bash run_example.sh
 ## Documentation
 See https://github.com/PalamaraLab/quickdraws/wiki/Quickdraws-GWAS-Software-Documentation
 
+## Summary Statistics for some UKB traits
+See https://www.stats.ox.ac.uk/publication-data/sge/ppg/quickdraws/ 
 
 ## Contact information
 For any technical issues please contact Hrushikesh Loya (loya@stats.ox.ac.uk)
