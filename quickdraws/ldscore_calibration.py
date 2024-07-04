@@ -256,26 +256,4 @@ def ldscore_genetic_covar(ldscores, sumstats_1, sumstats_2, mask_dodgy):
 
 
 if __name__ == "__main__":
-    import glob
-
-    bed = "/well/palamara/users/vnk166/workspace/meta_learning_prs/simulate/sim_400k/genotype_400k"
-    ldscores = pd.read_csv("/well/palamara/users/vnk166/workspace/quickdraws/LDSCORE.1000G_EUR.tab.gz", sep=r'\s+')
-    for name in np.sort(glob.glob("/well/palamara/users/vnk166/workspace/quickdraws/sim_400k/qt_10000.*sumstats.gz")):
-        if 'processed' in name:
-            continue
-        pheno = name.split("/well/palamara/users/vnk166/workspace/quickdraws/sim_400k/qt_10000")[1].split(".sumstats.gz")[0]
-        sumstats = pd.read_hdf(
-            "/well/palamara/users/vnk166/workspace/quickdraws/sim_400k/qt_10000_ldscdiff_lrunrel" + pheno + ".sumstats"
-        )
-        mask_dodgy = get_mask_dodgy(
-            ldscores[["SNP", "LDSCORE"]], sumstats, sumstats["OBS_CT"].mean()
-        )
-        ldscore_chip = calc_ldscore_chip(bed, mask_dodgy)
-        y_i1, slope1, m_chi1 = ldscore_intercept(ldscores, sumstats, ldscore_chip, mask_dodgy)
-        print("LR-unRel (200k): " + str((y_i1 - 1) / (m_chi1 - 1))+ " " + str(y_i1) + " " + str(m_chi1) + " " + str(slope1))
-
-        sumstats = pd.read_hdf(
-            "/well/palamara/users/vnk166/workspace/quickdraws/sim_400k/qt_10000_ldscdiff_lrunrel" + pheno + ".sumstats"
-        )
-        y_i2, slope2, m_chi2 = ldscore_intercept(ldscores, sumstats, ldscore_chip, mask_dodgy)
-        print("LR-unRel (Plink): " + str((y_i2 - 1) / (m_chi2 - 1))+ " " + str(y_i2) + " " + str(m_chi2) + " " + str(slope2))
+    pass
