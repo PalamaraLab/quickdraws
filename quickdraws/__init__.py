@@ -17,7 +17,7 @@
 
 
 from .runRHE import runRHE, MakeAnnotation
-from .convert_to_hdf5 import convert_to_hdf5
+from quickdraws.scripts.convert_to_hdf5 import convert_to_hdf5
 from .blr import blr_spike_slab, str_to_bool
 
 from .preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE

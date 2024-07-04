@@ -36,6 +36,7 @@ priority = "explicit"
 [tool.poetry.scripts]
 quickdraws-step-1 = "quickdraws.scripts.quickdraws_step1:main"
 quickdraws-step-2 = "quickdraws.scripts.quickdraws_step2:main"
+convert-to-hdf5 = "quickdraws.scripts.convert_to_hdf5:main"
 
 [build-system]
 requires = ["poetry-core"]
