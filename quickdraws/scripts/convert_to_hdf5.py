@@ -29,7 +29,9 @@ import pdb
 import numba
 import os
 
-from .preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
+from quickdraws.preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
+
+from quickdraws.scripts import get_copyright_string
 
 import logging
 logger = logging.getLogger(__name__)
@@ -285,10 +287,15 @@ def make_master_hdf5(
 
     h1.close()
     logging.info("Done saving the genotypes to hdf5 file " + str(out + '.hdf5'))
-    return out + ".hdf5"    
+    return out + ".hdf5"
 
 
-if __name__ == "__main__":
+def main():
+
+    logging.info(get_copyright_string())
+    logging.info("")
+    logging.info('Running script to create hdf5 file...')
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--bed", "-g", help="prefix for bed/bim/fam files", type=str, default=None
@@ -343,5 +350,11 @@ if __name__ == "__main__":
         filename = convert_to_hdf5(
             args.bed, args.covarFile, sample_indices, args.out, args.modelSnps, args.hdf5
         )
+        logging.info(f'... created {filename}')
     elif args.bed is not None:
-        make_master_hdf5(args.bed, args.out, args.modelSnps)
+        filename = make_master_hdf5(args.bed, args.out, args.modelSnps)
+        logging.info(f'... created {filename}')
+
+
+if __name__ == "__main__":
+    main()
