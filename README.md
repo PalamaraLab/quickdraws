@@ -2,9 +2,11 @@
 
 Quickdraws relies on cuda-enabled pytorch for speed, and it is expected to work on most cuda-compatible Linux systems.
 
+
 ## Installation
 
 It is strongly recommended to either set up a python virtual environment, or a conda environment:
+
 
 ### Python virtual environment
 
@@ -14,6 +16,7 @@ source venv/bin/activate
 pip install --upgrade pip setuptools wheel
 ```
 
+
 ### Conda environment
 
 ```
@@ -21,6 +24,7 @@ conda create -n quickdraws python=3.11 -y
 conda activate quickdraws
 pip install --upgrade pip setuptools wheel
 ```
+
 
 ### Install pytorch and quickdraws
 
@@ -48,6 +52,18 @@ Clone the Git repository to access the example data and script demonstrating how
 git clone https://github.com/PalamaraLab/quickdraws.git
 cd quickdraws
 bash run_example.sh
+```
+
+
+## Local development
+
+To make changes to the quickdraws sourcecode, obtain the repository and install it using [poetry](https://python-poetry.org/docs/).
+Assuming you have poetry installed:
+
+```
+git clone https://github.com/PalamaraLab/quickdraws.git
+cd quickdraws
+poetry install
 ```
 
 
