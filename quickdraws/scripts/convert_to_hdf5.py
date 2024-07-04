@@ -292,10 +292,6 @@ def make_master_hdf5(
 
 def main():
 
-    logging.info(get_copyright_string())
-    logging.info("")
-    logging.info('Running script to create hdf5 file...')
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--bed", "-g", help="prefix for bed/bim/fam files", type=str, default=None
@@ -341,19 +337,34 @@ def main():
     parser.add_argument("--hdf5", help="master hdf5 file which stores genotype matrix in binary format", type=str)
     args = parser.parse_args()
 
+    ######      Logging setup                    #######
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[
+            logging.FileHandler(args.out + ".log", "w", "utf-8"),
+            logging.StreamHandler()
+        ]
+    )
+
+    logging.info(get_copyright_string())
+    logging.info("")
+    logging.info("Logs saved in: " + str(args.out + ".log"))
+    logging.info("")
+    logging.info('Running script to create hdf5 file...')
+
+
     if args.bed is not None and args.phenoFile is not None:
         Traits, covar_effects, sample_indices = preprocess_phenotypes(
             args.phenoFile, args.covarFile, args.bed, args.keepFile, args.binary
         )
         PreparePhenoRHE(Traits, covar_effects, args.bed, args.out, None)
         # np.arange(405088)
-        filename = convert_to_hdf5(
+        convert_to_hdf5(
             args.bed, args.covarFile, sample_indices, args.out, args.modelSnps, args.hdf5
         )
-        logging.info(f'... created {filename}')
     elif args.bed is not None:
-        filename = make_master_hdf5(args.bed, args.out, args.modelSnps)
-        logging.info(f'... created {filename}')
+        make_master_hdf5(args.bed, args.out, args.modelSnps)
 
 
 if __name__ == "__main__":
