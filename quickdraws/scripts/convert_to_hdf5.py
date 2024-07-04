@@ -270,7 +270,7 @@ def make_master_hdf5(
         logging.info(str(i))
         x = 2 - (
             snp_on_disk[
-                i : min(i + chunk_size, total_samples), snp_mask
+                i : min(i + chunk_size, total_samples), :
             ]
             .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
             .val
