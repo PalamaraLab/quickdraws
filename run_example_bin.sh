@@ -9,6 +9,11 @@ sample="example/example.sample"
 outDir="example/output"
 mkdir -p ${outDir}
 
+## step 0: generating HDF5 file from data (optional step)
+convert-to-hdf5 \
+   --out ${outDir}/qd_bin \
+   --bed ${bed}
+
 ## step 1: run model fitting (step 1) on genotypes and phenotypes
 quickdraws-step-1 \
    --out ${outDir}/qd_bin \
