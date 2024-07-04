@@ -145,18 +145,4 @@ def get_unrelated_list(sample_list, kinship):
 
 if __name__ == '__main__':
     pass
-    # kinship = pd.read_csv('/well/palamara/projects/UKBB_APPLICATION_43206/new_copy/sample_lists/relatedness/ukb_rel_a43206_s488248.dat', '\s+')
-    # fam = pd.read_csv('/well/palamara/users/vnk166/workspace/meta_learning_prs/ukbb_gbp/genotype.fam', '\s+', names=["FID", "IID", 0, 1, 2, 3])
-    # # fam = pd.read_csv('/well/palamara/projects/UKBB_APPLICATION_43206/new_copy/plink_missingness_regenielike_filters/ukb_app43206_500k.maf00001.fam', '\s+', names=["FID", "IID", 0, 1, 2, 3])
-    # # fam = pd.read_csv('ukbb50k_rel3_gbp.fam', '\s+', names=["FID", "IID", 0, 1, 2, 3])
-    #
-    # ## merge with phenotype
-    # # traits = pd.read_csv('')
-    # # fam = pd.merge(fam, traits[])
-    #
-    # ## get the estimated h2
-    # h2 = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-    #
-    # correction = get_correction_for_relatives(fam.IID, kinship, h2)
-    # print(correction)
 
