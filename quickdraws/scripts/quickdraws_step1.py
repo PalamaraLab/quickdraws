@@ -360,6 +360,11 @@ def main():
         logging.info("Didn't find any GPU, using CPU to run variational inference... expect very slow multiplications")
         logging.info("")
         device = 'cpu'
+    
+    if args.kinship is None:
+        logging.info("Caution: A kinship file wasn't supplied, no correction for relatives will be performed... this could lead to inflation if there are relatives in the dataset")
+        logging.info("")
+    
     beta = blr_spike_slab(args, VC, hdf5_filename, device)
     logging.info("#### Step 1c. Done in " + str(time.time() - st) + " secs ####")
     logging.info("")

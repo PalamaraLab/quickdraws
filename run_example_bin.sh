@@ -3,6 +3,7 @@
 bed="example/example"
 phenoFile="example/phenotypes_binary.txt"
 covarFile="example/covariates.txt"
+kinship="example/example.kinship"
 bgen="example/example.bgen"
 sample="example/example.sample"
 
@@ -11,7 +12,7 @@ mkdir -p ${outDir}
 
 ## step 0: generating HDF5 file from data (optional step)
 convert-to-hdf5 \
-   --out ${outDir}/qd_bin \
+   --out ${outDir}/master_bin \
    --bed ${bed}
 
 ## step 1: run model fitting (step 1) on genotypes and phenotypes
@@ -20,6 +21,8 @@ quickdraws-step-1 \
    --bed ${bed} \
    --phenoFile ${phenoFile} \
    --covarFile ${covarFile} \
+   --kinship ${kinship} \
+   --hdf5 ${outDir}/master_bin.hdf5 \
    --h2_grid \
    --binary
 
