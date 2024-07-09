@@ -412,7 +412,13 @@ def get_test_statistics_bgen(
         logging.info("Using calibration file specified in: " + str(calibrationFile))
     else:
         ## TODO: make it general for binary traits with firth where the columns double
-        calibration_factors = pd.DataFrame(np.ones((len(traits.columns.tolist()) - 2, len(unique_chrs))), columns=unique_chrs)
+        logging.info("Caution: setting the calibration factors to unity as they were not provided, this could mean the resulting summary statistics is inflated...")
+        if firth:
+            calibration_factors = pd.DataFrame(np.ones((len(traits.columns.tolist()) - 2, 2*len(unique_chrs))), columns=[str((c, i)) for c in unique_chrs for i in [True, False]])
+        else:
+            calibration_factors = pd.DataFrame(np.ones((len(traits.columns.tolist()) - 2, len(unique_chrs))), columns=np.array(unique_chrs, dtype='str')) 
+        
+        calibration_factors['pheno'] = pheno_columns[2:] 
 
     logging.info("Running linear/logistic regression...")
     get_unadjusted_test_statistics_bgen(
@@ -568,6 +574,12 @@ def main():
 
     assert (args.calibrate and args.unrel_sample_list is not None) or (not args.calibrate) or (args.calibrationFile is not None)
     "Provide a list of unrelated homogenous sample if you wish to calibrate"
+    
+    if (not args.bed is None) and (args.calibrate is None):
+        logging.info("Caution: Not deciding to calibrate the summary statistics could mean the resulting summary statistics are inflated..")
+
+    if (not args.bgen is None) and (args.calibrationFile is None):
+        logging.info("Caution: Not deciding to calibrate the summary statistics could mean the resulting summary statistics are inflated..")
 
     ######      Calculating test statistics       ######
     st = time.time()
