@@ -572,14 +572,25 @@ def main():
     covareffects = args.out_step1 + ".covar_effects"
     firth_null_file = args.out_step1
 
-    assert (args.calibrate and args.unrel_sample_list is not None) or (not args.calibrate) or (args.calibrationFile is not None)
-    "Provide a list of unrelated homogenous sample if you wish to calibrate"
-    
-    if (not args.bed is None) and (args.calibrate is None):
+    # GK: I recognise three situations: 1) calibrate=False; 2) calibrate but wrong input; 3) calibrate with correct input
+    # 1) calibrate=False; print a warning and proceed.
+    if (not args.calibrate):  
         logging.info("Caution: Not deciding to calibrate the summary statistics could mean the resulting summary statistics are inflated..")
 
-    if (not args.bgen is None) and (args.calibrationFile is None):
-        logging.info("Caution: Not deciding to calibrate the summary statistics could mean the resulting summary statistics are inflated..")
+    # 2) calibrate but wrong input; should exit with error message
+    assert (not args.calibrate) or (args.calibrate and args.unrel_sample_list is not None) or (args.calibrate and args.calibrationFile is not None), "Provide a list of homogeneous and unrelated samples, or a file with calibration coefficients, if you wish to calibrate."
+    # not ((args.bgen is not None) and (args.calibrationFile is None))
+    assert (args.bgen is None) or (args.calibrationFile is not None), "If testing on BGEN files, provide a file with calibration coefficients (e.g. obtained using a BED file)."
+    
+    # 3) calibrate with correct input; all good so proceed
+    if (args.calibrate) and (args.bed is not None) and (args.unrel_sample_list is not None):
+        logging.info("Will calibrate the summary statistics using the unrelated homogeneous samples provided in: " + str(args.unrel_sample_list))
+
+    if (args.calibrate) and (args.bgen is not None) and (args.calibrationFile is not None):
+        logging.info("Will calibrate the summary statistics using the calibration coefficients provided in: " + str(args.calibrationFile))
+
+    # What if the user provides both a bed and a bgen file? TODO?
+    assert not ((args.bed is not None) and (args.bgen is not None)), "Provide either a BED or a BGEN file."
 
     ######      Calculating test statistics       ######
     st = time.time()
