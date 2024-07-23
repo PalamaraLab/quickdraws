@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "quickdraws"
-version = "0.0.3"
+version = "0.0.4"
 description = "Quickdraws is a software tool for performing Genome-Wide Association Studies (GWAS)"
 authors = ["Palamara Lab"]
 readme = "README.md"
@@ -10,9 +10,9 @@ python = "^3.9"
 h5py = "*"
 joblib = "*"
 numba = "*"
-numpy = "<2"
+numpy = "*"
 pandas = "*"
-pysnptools = { version = "*", extras = ["bgen"] }
+pysnptools = { version = ">=0.5.13", extras = ["bgen"] }
 scikit_learn = "*"
 scipy = "*"
 statsmodels = "*"
