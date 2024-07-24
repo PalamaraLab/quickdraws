@@ -30,7 +30,7 @@ pip install --upgrade pip setuptools wheel
 
 It is necessary for anything bigger than toy examples to use a cuda-enabled version of pytorch.
 Use the [pytorch configuration helper](https://pytorch.org/get-started/locally/) to find suitable installation instruction for your system.
-The code snippet below will probably work for most systems:
+The code snippet below will probably work for most systems and should install quickdraws in approximately 10mins:
 
 ```
 pip install torch --index-url https://download.pytorch.org/whl/cu118
