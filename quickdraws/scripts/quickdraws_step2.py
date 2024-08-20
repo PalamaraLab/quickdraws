@@ -50,6 +50,14 @@ from quickdraws import (
 
 from quickdraws.scripts import get_copyright_string
 
+def get_cpu_count():
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        pass
+    except Exception as e:
+        raise e     
+    return os.cpu_count()
 
 def make_sure_path_exists(path):
     try:
@@ -235,7 +243,7 @@ def get_test_statistics(
     weights=None
 ):
     if n_workers == -1:
-        n_workers = len(os.sched_getaffinity(0))
+        n_workers = get_cpu_count()
 
     if weights is not None and binary:
         logging.exception("Weighted linear regression only supported for quantitive traits..")
@@ -364,7 +372,7 @@ def get_test_statistics_bgen(
     weights=None
 ):
     if n_workers == -1:
-        n_workers = len(os.sched_getaffinity(0))
+        n_workers = get_cpu_count()
 
     if weights is not None and binary:
         logging.exception("Weighted linear regression only supported for quantitive traits..")

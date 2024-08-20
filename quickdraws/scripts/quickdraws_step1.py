@@ -356,6 +356,10 @@ def main():
         logging.info("Using GPU to run variational inference!!")
         logging.info("")
         device = 'cuda'
+    elif torch.mps.is_available():
+        logging.info("Using MPS to run variational inference!!")
+        logging.info("")
+        device = 'mps'
     else:
         logging.info("Didn't find any GPU, using CPU to run variational inference... expect very slow multiplications")
         logging.info("")

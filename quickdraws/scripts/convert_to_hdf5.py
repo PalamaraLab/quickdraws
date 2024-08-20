@@ -36,6 +36,15 @@ from quickdraws.scripts import get_copyright_string
 import logging
 logger = logging.getLogger(__name__)
 
+def get_cpu_count():
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        pass
+    except Exception as e:
+        raise e     
+    return os.cpu_count()
+
 @numba.jit(nopython=True)
 def get_xtx(x, covars, K):
     for snp in numba.prange(x.shape[1]):
@@ -59,7 +68,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=512,
     snp_on_disk = snp_on_disk[sample_indices, snp_mask]
     chunk_size = min(chunk_size, snp_on_disk.shape[1])
     if covars is None:
-        covars = np.ones((len(sample_indices), 1), dtype='float32')
+        covars = np.ones((len(sample_indices), 1), dtype='float64')
     else:
         df_covar = pd.read_csv(covars, sep=r'\s+')
         df_covar = pd.merge(
@@ -98,9 +107,9 @@ def convert_to_hdf5(
     out="out",
     snps_to_keep_filename=None,
     master_hdf5=None,
-    chunk_size=4096,
+    chunk_size=512,
 ):
-    num_threads = len(os.sched_getaffinity(0))
+    num_threads = get_cpu_count()
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
 
     ## handle phenotypes here
@@ -224,7 +233,7 @@ def make_master_hdf5(
     bed,
     out="out",
     snps_to_keep_filename=None,
-    chunk_size=4096,
+    chunk_size=512,
 ):
     num_threads = len(os.sched_getaffinity(0))
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
