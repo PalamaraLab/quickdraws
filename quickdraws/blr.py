@@ -47,6 +47,7 @@ import gc
 import logging
 
 from .correct_for_relatives import get_correction_for_relatives
+from scripts import get_cpu_count
 
 logger = logging.getLogger(__name__)
 torch._dynamo.config.cache_size_limit = 128
@@ -59,15 +60,6 @@ multiprocessing.set_start_method('fork', force=True)
 
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
-
-def get_cpu_count():
-    try:
-        return len(os.sched_getaffinity(0))
-    except AttributeError:
-        pass
-    except Exception as e:
-        raise e     
-    return os.cpu_count()
 
 ## Custom layers:
 class BBB_Linear_spike_slab(nn.Module):

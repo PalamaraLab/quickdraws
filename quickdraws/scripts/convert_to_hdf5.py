@@ -31,19 +31,10 @@ import os
 
 from quickdraws.preprocess_phenotypes import preprocess_phenotypes, PreparePhenoRHE
 
-from quickdraws.scripts import get_copyright_string
+from quickdraws.scripts import get_copyright_string, get_cpu_count
 
 import logging
 logger = logging.getLogger(__name__)
-
-def get_cpu_count():
-    try:
-        return len(os.sched_getaffinity(0))
-    except AttributeError:
-        pass
-    except Exception as e:
-        raise e     
-    return os.cpu_count()
 
 @numba.jit(nopython=True)
 def get_xtx(x, covars, K):

@@ -30,7 +30,7 @@ setuptools = ">=68"
 
 [[tool.poetry.source]]
 name = "pytorch-cu118"
-url = "https://download.pytorch.org/whl/cu118"
+url = "https://download.pytorch.org/whl/nightly/cu118"
 priority = "explicit"
 
 [tool.poetry.scripts]

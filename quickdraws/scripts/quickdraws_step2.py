@@ -48,16 +48,7 @@ from quickdraws import (
     preprocess_phenotypes,
 )
 
-from quickdraws.scripts import get_copyright_string
-
-def get_cpu_count():
-    try:
-        return len(os.sched_getaffinity(0))
-    except AttributeError:
-        pass
-    except Exception as e:
-        raise e     
-    return os.cpu_count()
+from quickdraws.scripts import get_copyright_string, get_cpu_count
 
 def make_sure_path_exists(path):
     try:
