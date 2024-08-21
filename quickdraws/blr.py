@@ -47,7 +47,7 @@ import gc
 import logging
 
 from .correct_for_relatives import get_correction_for_relatives
-from scripts import get_cpu_count
+from .scripts import get_cpu_count
 
 logger = logging.getLogger(__name__)
 torch._dynamo.config.cache_size_limit = 128
