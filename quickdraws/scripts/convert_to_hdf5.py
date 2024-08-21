@@ -226,7 +226,7 @@ def make_master_hdf5(
     snps_to_keep_filename=None,
     chunk_size=512,
 ):
-    num_threads = len(os.sched_getaffinity(0))
+    num_threads = get_cpu_count()
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
     snp_on_disk = Bed(bed, count_A1=True)
 
