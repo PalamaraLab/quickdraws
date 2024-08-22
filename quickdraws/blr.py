@@ -43,20 +43,22 @@ import torch.nn.functional as F
 from joblib import Parallel, delayed
 
 import gc
-import pdb
+# import pdb
 import logging
 
 from .correct_for_relatives import get_correction_for_relatives
+from .scripts import get_cpu_count
 
 logger = logging.getLogger(__name__)
-# torch._dynamo.config.cache_size_limit = 1024
 
 if torch.cuda.is_available():
     import bitsandbytes as bnb
 
+import multiprocessing
+multiprocessing.set_start_method('fork', force=True)
+
 def str_to_bool(s: str) -> bool:
     return bool(strtobool(s))
-
 
 ## Custom layers:
 class BBB_Linear_spike_slab(nn.Module):
@@ -120,7 +122,7 @@ class BBB_Linear_spike_slab(nn.Module):
         eps = 1e-12
         self.c = min(self.c + 0.01, 10)
         sig1 = torch.clamp(F.relu(self.sigma1), min=eps)
-        weight_mu = mu1.weight
+        weight_mu = mu1
         spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
         out = self.local_reparameterize(
             x, spike, weight_mu, sig1, weight_mu.device, test
@@ -128,56 +130,21 @@ class BBB_Linear_spike_slab(nn.Module):
         if only_output:
             return out, 0
 
-        logvar = torch.log(sig1.pow(2))
-
+        sig1_2 = sig1.pow(2)
+        logvar = torch.log(sig1_2)
         KL_div = -0.5 * torch.sum(
             spike.mul(
                 1
                 + logvar
                 - self.log_prior_var
-                - mu1.weight.pow(2) / self.prior_var
-                - logvar.exp() / self.prior_var
+                - mu1.pow(2) / self.prior_var
+                - sig1_2 / self.prior_var
             )
         ) + torch.sum(
             (1 - spike).mul(torch.log((1 - spike) / (1 - self.alpha)))
             + spike.mul(torch.log(spike / self.alpha))
         )
         return out, KL_div / self.num_samples
-
-    def reparameterize(self, mu1, sig1, device, test=False):
-        if test:
-            spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
-            return spike.mul(mu1)
-        if device.type == 'cuda':
-            eps = torch.cuda.FloatTensor(mu1.shape)
-        else:
-            eps = torch.FloatTensor(mu1.shape)
-        torch.randn(mu1.shape, out=eps)
-        sig_eps = torch.mul(sig1, eps)
-        gaussian1 = mu1 + sig_eps
-        gaussian2 = mu1 - sig_eps
-
-        spike = torch.clamp(self.spike1, 1e-6, 1.0 - 1e-6)
-        log_spike = torch.log(spike / (1 - spike))
-        if device.type == 'cuda':
-            unif = torch.cuda.FloatTensor(spike.shape)
-        else:
-            unif = torch.FloatTensor(spike.shape)
-        torch.rand(spike.shape, out=unif)
-        log_unif = torch.log(unif / (1 - unif))
-        eta1 = log_spike + log_unif
-        eta2 = log_spike - log_unif
-
-        selection = torch.stack(
-            (
-                F.sigmoid(self.c * eta1).mul(gaussian1),
-                F.sigmoid(self.c * eta2).mul(gaussian2),
-                F.sigmoid(self.c * eta1).mul(gaussian2),
-                F.sigmoid(self.c * eta2).mul(gaussian1),
-            ),
-            dim=0,
-        )  ##shape = 4 x O X I
-        return selection
 
     def local_reparameterize(self, x, spike, mu1, sig1, device, test=False):
         assert x.ndim == 2
@@ -192,14 +159,18 @@ class BBB_Linear_spike_slab(nn.Module):
         )
         if device.type == 'cuda':
             eps = torch.cuda.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
+        elif device.type == 'mps':
+            eps = torch.randn(x.shape[0], mu1.shape[0], device=device)
         else:
             eps = torch.FloatTensor(x.shape[0], mu1.shape[0]).normal_()
+        
+        mean_ = F.linear(x, mean_preactivations)
+        var_ = eps * torch.sqrt(F.linear(x.pow(2), var_preactivations))
+
         selection = torch.stack(
             (
-                F.linear(x, mean_preactivations)
-                + eps * torch.sqrt(F.linear(x.pow(2), var_preactivations)),
-                F.linear(x, mean_preactivations)
-                - eps * torch.sqrt(F.linear(x.pow(2), var_preactivations)),
+                mean_ + var_,
+                mean_ - var_,
             ),
             dim=0,
         )
@@ -262,7 +233,7 @@ class Model(nn.Module):
             num_samples=num_samples,
             alpha=alpha,
             prior_sig=prior_sig,
-            mu1=self.fc1,
+            mu1=self.fc1.weight,
         )
         if posterior_sig is not None:
             # logging.info("Setting posterior sigma to CAVI derived sigmas")
@@ -287,7 +258,7 @@ class Model(nn.Module):
     '''
     def forward(self, x, offset, only_output=False, test=False, binary=False):
         num_batches = x.shape[0]
-        x, reg = self.sc1(x, self.fc1, only_output, test)
+        x, reg = self.sc1(x, self.fc1.weight, only_output, test)
         if binary:
             x = torch.sigmoid(x + offset)
         else:
@@ -332,7 +303,7 @@ class HDF5Dataset:
             ).float()
             self.covars = torch.as_tensor(np.array(self.h5py_file["covars"])[0:train_samples]).float()
         elif split == "test":
-            ### No lowmem in testing, can just reduce train_split or test at the end
+            ### TODO: No lowmem in testing, can just reduce train_split or test at the end
             self.hap1 = np.array(self.h5py_file["hap1"][train_samples:])
             self.hap2 = np.array(self.h5py_file["hap2"][train_samples:])
             self.output = torch.as_tensor(
@@ -799,7 +770,7 @@ class Trainer:
                 reg_loss_arr.append(reg_loss.item())
                 total_loss_arr.append(loss.item())
                 ## Backprop ##
-                self.optimizer_list[model_no].zero_grad()
+                self.optimizer_list[model_no].zero_grad(set_to_none=True)
                 loss.backward()
                 self.optimizer_list[model_no].step()
 
@@ -896,7 +867,7 @@ class Trainer:
                 loss = 0.5 * mse_loss + reg_loss
 
                 ## Backprop ##
-                self.optimizer_list[model_no].zero_grad()
+                self.optimizer_list[model_no].zero_grad(set_to_none=True)
                 loss.backward()
                 self.optimizer_list[model_no].step()
 
@@ -1029,7 +1000,8 @@ def initialize_model(
                     else None,
                 )
                 model = model.to(device)
-                # model = torch.compile(model)
+                if device == 'cpu':
+                    model = torch.compile(model) 
                 model_list.append(model)
         else:
             model = Model(
@@ -1043,7 +1015,8 @@ def initialize_model(
                 spike=spike,
             )
             model = model.to(device)
-            # model = torch.compile(model)
+            if device == 'cpu':
+                model = torch.compile(model)
             model_list.append(model)
     '''The function returns the list of initialized models (model_list), ready for training or inference.'''
     return model_list
@@ -1213,6 +1186,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     dataset, and the computation of Bayesian estimates. 
     '''
     overall_start_time = time.time()
+    torch.set_num_threads(get_cpu_count())  ## speedify computation on CPU
     if not args.wandb_mode == "disabled":
         logging.info("Initializing wandb to log the progress..")
         wandb.init(
@@ -1426,7 +1400,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
 
     ## Calculate correction for relatives
     if args.kinship is not None:
-        kinship = pd.read_csv(args.kinship, sep=r'\s+')
+        kinship = pd.read_csv(args.kinship, sep='\s+')
         h2 = h2.numpy()
         if args.binary:
             ## convert from liability to observed scale

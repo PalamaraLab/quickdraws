@@ -224,16 +224,18 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
     else:
         unrel_sample_list = np.array(snp_on_disk.iid[:, 0].tolist(), dtype="int")
 
-    unrel_pheno = []
-    for sample in unrel_sample_list:
-        try:
-            unrel_pheno.append([sample, sample] + (Trait.loc[Trait.FID == sample, Trait.columns[2:]].values[0] - covar_effects.loc[covar_effects.FID == sample, covar_effects.columns[2:]].values[0]).tolist())
-        except:
-            unrel_pheno.append([sample, sample] + [np.nan] * (Trait.shape[1] - 2))
+    Trait.set_index('FID', inplace=True, drop=False)
+    covar_effects.set_index('FID', inplace=True, drop=False)
+    df_rhe = pd.DataFrame(index=unrel_sample_list, columns=Trait.columns)
+    common_samples = Trait.index.intersection(covar_effects.index)
+    df_rhe.loc[common_samples, Trait.columns[2:]] = Trait.loc[common_samples, Trait.columns[2:]] - covar_effects.loc[common_samples, covar_effects.columns[2:]]
+    df_rhe.loc[~df_rhe.index.isin(common_samples), Trait.columns[2:]] = np.nan
+    df_rhe['FID'] = df_rhe.index
+    df_rhe['IID'] = df_rhe.index
+    df_rhe = df_rhe[['FID', 'IID'] + Trait.columns[2:].tolist()]
+    df_rhe = df_rhe.reset_index(drop=True)
+    assert len(df_rhe) == len(unrel_sample_list)
 
-    assert len(unrel_pheno) == len(unrel_sample_list)
-
-    df_rhe = pd.DataFrame(unrel_pheno, columns=Trait.columns)
     df_rhe.FID = df_rhe.FID.astype("int")
     df_rhe.IID = df_rhe.IID.astype("int")
     df_rhe.to_csv(filename + ".rhe", index=None, sep="\t", na_rep="NA")

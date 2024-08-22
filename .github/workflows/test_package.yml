@@ -20,8 +20,8 @@ jobs:
             python: "3.10"
           - os: "ubuntu-24.04"
             python: "3.12"
-#          - os: "macos-14"
-#            python: "3.12"
+          # - os: "self-hosted-macos-arm64-hemlock"
+          #   python: "3.12"
 
     steps:
       - name: checkout repo

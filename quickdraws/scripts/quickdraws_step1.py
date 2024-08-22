@@ -355,12 +355,20 @@ def main():
     if torch.cuda.is_available():
         logging.info("Using GPU to run variational inference!!")
         logging.info("")
-        device = 'cuda'
+        device = 'cuda' 
     else:
-        logging.info("Didn't find any GPU, using CPU to run variational inference... expect very slow multiplications")
-        logging.info("")
-        device = 'cpu'
-    
+        try:
+            torch.mps.is_available()
+            logging.info("Using MPS to run variational inference!!")
+            logging.info("")
+            device = 'mps'
+        except:
+            logging.info("This pytorch version doesnt support MPS, if you are running on mac the neural engine computation wouldn't be used...")
+            logging.info("Didn't find any GPU, using CPU to run variational inference... expect very slow multiplications")
+            logging.info("")
+            device = 'cpu'
+            pass
+            
     if args.kinship is None:
         logging.info("Caution: A kinship file wasn't supplied, no correction for relatives will be performed... this could lead to inflation if there are relatives in the dataset")
         logging.info("")

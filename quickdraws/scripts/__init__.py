@@ -39,3 +39,13 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with Quickdraws. If not, see <http://www.gnu.org/licenses/>.
 """
+
+import os
+def get_cpu_count():
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        pass
+    except Exception as e:
+        raise e     
+    return os.cpu_count()
