@@ -40,7 +40,7 @@ def adj_r2_(dotprod, n):
     r2 = dotprod * dotprod
     return r2 - (1 - r2) / (n - 2)
 
-def calc_ldscore_chip(bed, num_samples=4000):
+def calc_ldscore_chip(bed, num_samples=1000):
     outlier_window = 1e6
 
     snp_data = Bed(bed, count_A1=True)
