@@ -15,8 +15,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.9", "3.12"]
-        os: ["ubuntu-24.04"]
+        include:
+          - os: "ubuntu-24.04"
+            python: "3.10"
+          - os: "ubuntu-24.04"
+            python: "3.12"
+          - os: "macos-14"
+            python: "3.12"
 
     steps:
       - name: checkout repo
@@ -30,9 +35,9 @@ jobs:
         run: |
           pipx install poetry
 
-      - name: install cuda-enabled torch
+      - name: check python version
         run: |
-          poetry run pip install torch --index-url https://download.pytorch.org/whl/cu118
+          poetry run python --version
 
       - name: install python module
         run: |
@@ -47,9 +52,3 @@ jobs:
       - name: check dist builds
         run: |
           poetry build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist-${{ matrix.python }}-${{ matrix.os }}
-          path: ./dist/*
-          retention-days: 1
