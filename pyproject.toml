@@ -1,35 +1,43 @@
 [tool.poetry]
 name = "quickdraws"
-version = "0.0.3"
+version = "0.0.4"
 description = "Quickdraws is a software tool for performing Genome-Wide Association Studies (GWAS)"
 authors = ["Palamara Lab"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
+python = "^3.10"
 h5py = "*"
 joblib = "*"
 numba = "*"
-numpy = "<2"
+numpy = "*"
 pandas = "*"
-pysnptools = { version = "*", extras = ["bgen"] }
+pysnptools = { version = ">=0.5.13", extras = ["bgen"] }
 scikit_learn = "*"
 scipy = "*"
 statsmodels = "*"
 tqdm = "*"
 wandb = "*"
-tables = "*"
-bitsandbytes = "0.42.0"
+tables = "^3.10.1"
+bitsandbytes = { version = "*", markers = "sys_platform == 'linux'" }
 pybgen = "*"
 rhe = "==1.0.0"
-torch = { version = "2.*", source = "pytorch-cu118" }
+torch = [
+    { version = "2.*", allow-prereleases = true, markers = "sys_platform == 'darwin'", source = "torch_macos" },
+    { version = "2.*", markers = "sys_platform == 'linux'", source = "torch_linux_cu118" }
+]
 
 [tool.poetry.dev-dependencies]
 pip = ">=23"
 setuptools = ">=68"
 
 [[tool.poetry.source]]
-name = "pytorch-cu118"
+name = "torch_macos"
+url = "https://download.pytorch.org/whl/nightly/cpu"
+priority = "explicit"
+
+[[tool.poetry.source]]
+name = "torch_linux_cu118"
 url = "https://download.pytorch.org/whl/cu118"
 priority = "explicit"
 
