@@ -224,8 +224,8 @@ def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None)
     else:
         unrel_sample_list = np.array(snp_on_disk.iid[:, 0].tolist(), dtype="int")
 
-    Trait.set_index('FID', inplace=True)
-    covar_effects.set_index('FID', inplace=True)
+    Trait.set_index('FID', inplace=True, drop=False)
+    covar_effects.set_index('FID', inplace=True, drop=False)
     df_rhe = pd.DataFrame(index=unrel_sample_list, columns=Trait.columns)
     common_samples = Trait.index.intersection(covar_effects.index)
     df_rhe.loc[common_samples, Trait.columns[2:]] = Trait.loc[common_samples, Trait.columns[2:]] - covar_effects.loc[common_samples, covar_effects.columns[2:]]
