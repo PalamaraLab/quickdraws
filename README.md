@@ -28,12 +28,25 @@ pip install --upgrade pip setuptools wheel
 
 ### Install pytorch and quickdraws
 
-It is necessary for anything bigger than toy examples to use a cuda-enabled version of pytorch.
+It is necessary for anything bigger than toy examples to use either:
+
+1. on Linux, a cuda-enabled version of pytorch
+2. on macOS, the latest nightly build of pytorch, which can leverage the MPS backend
+
 Use the [pytorch configuration helper](https://pytorch.org/get-started/locally/) to find suitable installation instruction for your system.
-The code snippet below will probably work for most systems:
+The code snippets below will probably work for most systems:
+
+#### Linux
 
 ```
 pip install torch --index-url https://download.pytorch.org/whl/cu118
+pip install quickdraws
+```
+
+#### macOS
+
+```
+pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 pip install quickdraws
 ```
 
