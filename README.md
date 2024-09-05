@@ -1,6 +1,6 @@
 # Quickdraws
 
-![Quickdraws Logo](./quickdraw.png)
+<img src="./quickdraw.png" alt="Quickdraws Logo" width="200"/>
 
 Quickdraws relies on cuda-enabled pytorch for speed, and it is expected to work on most cuda-compatible Linux systems.
 
