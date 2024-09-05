@@ -1,5 +1,7 @@
 # Quickdraws
 
+![Quickdraws Logo](https://github.com/PalamaraLab/quickdraws/blob/main/quickdraw.png)
+
 Quickdraws relies on cuda-enabled pytorch for speed, and it is expected to work on most cuda-compatible Linux systems.
 
 
