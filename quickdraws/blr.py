@@ -1440,7 +1440,7 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     '''
 
     if args.predBetasFlag:
-        logging.info("Calculating the BLUP Betas using the entire data...")
+        logging.info("Calculating the posterior prediciton betas using the entire data...")
         dim_out = full_dataset.output.shape[1]
         best_alpha = np.argmax(output_r2_subset, axis=1)
         mu_list = np.zeros((dim_out, len(std_genotype)))

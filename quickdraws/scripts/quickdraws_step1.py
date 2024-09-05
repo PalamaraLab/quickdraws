@@ -221,7 +221,7 @@ def main():
     )
     parser.add_argument(
         "--predBetasFlag",
-        help="Indicate if you want to calculate and store the BLUP betas",
+        help="Indicate if you want to calculate and store the prediction posterior betas",
         action="store_const",
         const=True,
         default=False,
@@ -425,10 +425,10 @@ def main():
         print(df.shape)
         for d, pheno_name in enumerate(pheno_names):
             df['BETA'] = beta[d]
-            df.to_csv(args.out + '_' + pheno_name.decode() + '.blup', sep='\t', index=None, na_rep='NA')
-        logging.info("Saved BLUP betas per phenotype as: ")
+            df.to_csv(args.out + '_' + pheno_name.decode() + '.posterior_betas', sep='\t', index=None, na_rep='NA')
+        logging.info("Saved prediction posterior betas per phenotype as: ")
         for i, pheno_name in enumerate(pheno_names):
-            logging.info(pheno_name.decode() + " : " + str(Path(args.out).resolve()) + "_" + pheno_name.decode() + ".blup")
+            logging.info(pheno_name.decode() + " : " + str(Path(args.out).resolve()) + "_" + pheno_name.decode() + ".posterior_betas")
         logging.info("")
 
     logging.info("#### Step 1 total Time: " + str(time.time() - overall_st) + " secs ####")
