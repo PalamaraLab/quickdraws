@@ -81,7 +81,7 @@ poetry install
 
 
 ## Documentation
-See https://github.com/PalamaraLab/quickdraws/wiki/Quickdraws-GWAS-Software-Documentation
+See https://palamaralab.github.io/software/quickdraws/manual/
 
 ## Summary Statistics for some UKB traits
 See https://www.stats.ox.ac.uk/publication-data/sge/ppg/quickdraws/ 
