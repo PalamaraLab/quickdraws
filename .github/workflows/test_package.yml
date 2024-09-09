@@ -41,7 +41,7 @@ jobs:
 
       - name: install python module
         run: |
-          poetry install
+          poetry install --no-cache
 
       - name: run python example
         run: |

@@ -24,11 +24,15 @@ jobs:
 
       - name: install poetry
         run: |
-          pipx install poetry
+          curl -sSL https://install.python-poetry.org | python -
+
+      - name: check python version
+        run: |
+          poetry run python --version
 
       - name: install dependencies
         run: |
-          poetry install
+          poetry install --no-cache
 
       - name: build package
         run: |
