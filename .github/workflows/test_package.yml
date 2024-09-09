@@ -41,7 +41,11 @@ jobs:
 
       - name: install python module
         run: |
-          poetry install
+          poetry install --no-cache
+
+      - name: check disk space
+        run: |
+          df -h .
 
       - name: run python example
         run: |
