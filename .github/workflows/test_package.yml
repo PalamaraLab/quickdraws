@@ -43,6 +43,10 @@ jobs:
         run: |
           poetry install --no-cache
 
+      - name: check disk space
+        run: |
+          df -h .
+
       - name: run python example
         run: |
           chmod +x run_example.sh
