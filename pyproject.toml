@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "quickdraws"
-version = "0.0.4"
+version = "0.1.0"
 description = "Quickdraws is a software tool for performing Genome-Wide Association Studies (GWAS)"
 authors = ["Palamara Lab"]
 readme = "README.md"

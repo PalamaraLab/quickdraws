@@ -94,3 +94,10 @@ For any technical issues please contact Hrushikesh Loya (loya@stats.ox.ac.uk)
 
 ## Citation
 Loya et al., "A scalable variational inference approach for increased mixed-model association power" under review
+
+
+## Release Notes
+
+### v0.1.0 (2024-10-15)
+
+First public release to accompany the paper (see citation above).
