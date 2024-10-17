@@ -62,8 +62,7 @@ def str_to_bool(s: str) -> bool:
 
 ## Custom layers:
 class BBB_Linear_spike_slab(nn.Module):
-    ''' This class is a custom PyTorch module implementing a Bayesian Linear layer with spike-and-slab priors. 
-    This advanced concept is used in Bayesian neural networks to introduce sparsity in the model weights. 
+    ''' This class is a custom PyTorch module implementing a Bayesian Linear layer with spike-and-slab priors, used to introduce sparsity in the model weights. 
     
     __init__ : Inherit from nn.Module: Inherits from PyTorch's base class for all neural network modules.
     Parameters: Accepts parameters like the number of samples to draw during inference (num_samples), the shape of the weights tensor (weights_shape, from the fc1 layer), 
@@ -180,8 +179,7 @@ class BBB_Linear_spike_slab(nn.Module):
 ## Neural network model:
 class Model(nn.Module):
     '''
-    The Model class extends PyTorch's nn.Module and encapsulates a neural network model that utilizes 
-    a Bayesian by Backpropagation Linear layer with spike-and-slab priors (BBB_Linear_spike_slab).
+    The Model class extends PyTorch's nn.Module and encapsulates a neural network model.
 
     __init__ : Inherits from nn.Module, PyTorch's base class for all neural network modules. Parameters:
 
@@ -1181,9 +1179,8 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     '''
-    The blr_spike_slab function encapsulates the entire process of performing Bayesian Linear Regression (BLR) with spike-and-slab priors, 
-    specifically tailored for genetic data analysis. It includes steps for hyperparameter tuning, model training on the entire 
-    dataset, and the computation of Bayesian estimates. 
+    The blr_spike_slab function encapsulates the entire process of performing Bayesian Linear Regression (BLR) with spike-and-slab priors. It includes steps for hyperparameter tuning, model training on the entire 
+    dataset, and the computation of posteriors. 
     '''
     overall_start_time = time.time()
     torch.set_num_threads(get_cpu_count())  ## speedify computation on CPU
@@ -1432,11 +1429,11 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     )
 
     '''
-    If args.predBetasFlag is true, calculates the Best Linear Unbiased Prediction (BLUP) Betas for the entire dataset 
+    If args.predBetasFlag is true, calculates posterior Betas for the entire dataset 
     using the trained models. This involves extracting the mean (mu) and spike parameters from the models corresponding 
     to the best alpha values and computing the product to obtain the Betas.
 
-    Calculation of BLUP Betas: The BLUP Betas are computed as the product of mu and spike parameters.
+    Calculation of Betas: The posterior Betas are computed as the product of mu and spike parameters.
     '''
 
     if args.predBetasFlag:
