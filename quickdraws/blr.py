@@ -179,35 +179,36 @@ class BBB_Linear_spike_slab(nn.Module):
 ## Neural network model:
 class Model(nn.Module):
     '''
-    The Model class extends PyTorch's nn.Module and encapsulates a neural network model.
+    The Model class extends PyTorch's nn.Module and encapsulates a neural network model that utilizes
+    a Bayesian by Backpropagation Linear layer with spike-and-slab priors (BBB_Linear_spike_slab).
 
     __init__ : Inherits from nn.Module, PyTorch's base class for all neural network modules. Parameters:
 
-    dim_in: Input dimensionality. 
-    The input dimension of the model is set to the number of SNPs not on the chromosome currently being left out (LOCO analysis). 
+    dim_in: Input dimensionality.
+    The input dimension of the model is set to the number of SNPs not on the chromosome currently being left out (LOCO analysis).
     This is determined by counting the SNPs where chr_map != chr, ensuring that the model only considers SNPs from other chromosomes.
 
     dim_out: Output dimensionality.
-    The output dimension is determined by the count of elements in dim_out that match the current alpha_no. 
-    This effectively sets the number of outputs to match the number of traits or phenotypes 
+    The output dimension is determined by the count of elements in dim_out that match the current alpha_no.
+    This effectively sets the number of outputs to match the number of traits or phenotypes
     being analyzed under the current alpha configuration.
 
     num_samples: Number of samples to draw from the posterior during inference.
-    Specifies the number of samples to draw from the posterior distribution during inference. 
-    
+    Specifies the number of samples to draw from the posterior distribution during inference.
+
     alpha: Hyperparameter for controlling the sparsity in the weights.
 
     prior_sig: Standard deviation of the prior distribution of the weights.
 
     posterior_sig: Optional; standard deviation of the posterior distribution of the weights, initialized during training.
-    Specifies the standard deviation of the posterior distribution of the weights. Like prior_sig, it is adjusted for the current alpha_no and excludes SNPs from the current chromosome. 
-    
+    Specifies the standard deviation of the posterior distribution of the weights. Like prior_sig, it is adjusted for the current alpha_no and excludes SNPs from the current chromosome.
+
     mu: Optional; initial mean values of the posterior distribution of the weights.
-    Represents the mean values of the posterior distribution of the weights. If provided, mu is filtered based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the specified device. 
+    Represents the mean values of the posterior distribution of the weights. If provided, mu is filtered based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the specified device.
     This operation initializes the model's weights with values potentially learned from previous analyses or a different context.
 
     spike: Optional; initial values of the spike variable, controlling the sparsity of the weights.
-    Specifies the spike parameter values for the spike-and-slab prior. Like mu, if spike is provided, it is processed based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the device. 
+    Specifies the spike parameter values for the spike-and-slab prior. Like mu, if spike is provided, it is processed based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the device.
     The spike parameter controls the sparsity in the model's weights, complementing the role of alpha.
 
     Initializes a linear layer (fc1) without bias, followed by a BBB_Linear_spike_slab layer (sc1) with specified parameters.
