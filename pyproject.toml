@@ -34,7 +34,7 @@ setuptools = ">=68"
 [[tool.poetry.source]]
 name = "torch_linux_cu118"
 url = "https://download.pytorch.org/whl/cu118"
-priority = "explicit"
+priority = "supplemental"
 
 [tool.poetry.scripts]
 quickdraws-step-1 = "quickdraws.scripts.quickdraws_step1:main"
