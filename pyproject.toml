@@ -23,7 +23,7 @@ bitsandbytes = { version = "*", markers = "sys_platform == 'linux'" }
 pybgen = "*"
 rhe = "==1.0.0"
 torch = [
-    { version = ">=2.5", markers = "sys_platform == 'darwin'" },
+    { version = ">=2.5", markers = "sys_platform == 'darwin'", source = "pypi" },
     { version = ">=2.5", markers = "sys_platform == 'linux'", source = "torch_linux_cu118" }
 ]
 
