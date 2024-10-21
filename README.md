@@ -36,7 +36,7 @@ It is necessary for anything bigger than toy examples to use either:
 2. on macOS, the latest nightly build of pytorch, which can leverage the MPS backend
 
 Use the [pytorch configuration helper](https://pytorch.org/get-started/locally/) to find suitable installation instruction for your system.
-The code snippets below will probably work for most systems, and should install quickdraws in approximately 10 minutes:
+The code snippets below will probably work for most systems, and should install quickdraws in approximately 10 minutes for cuda or much quicker on macOS:
 
 #### Linux
 
@@ -48,7 +48,6 @@ pip install quickdraws
 #### macOS
 
 ```
-pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 pip install quickdraws
 ```
 
