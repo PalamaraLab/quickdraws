@@ -98,6 +98,11 @@ Loya et al., "A scalable variational inference approach for increased mixed-mode
 
 ## Release Notes
 
+### v0.1.1 (2024-10-24)
+
+- Minor updates to documentation
+- Remove reliance on pre-release Torch for macOS
+
 ### v0.1.0 (2024-10-15)
 
 First public release to accompany the paper (see citation above).
