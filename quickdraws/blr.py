@@ -62,8 +62,7 @@ def str_to_bool(s: str) -> bool:
 
 ## Custom layers:
 class BBB_Linear_spike_slab(nn.Module):
-    ''' This class is a custom PyTorch module implementing a Bayesian Linear layer with spike-and-slab priors. 
-    This advanced concept is used in Bayesian neural networks to introduce sparsity in the model weights. 
+    ''' This class is a custom PyTorch module implementing a Bayesian Linear layer with spike-and-slab priors, used to introduce sparsity in the model weights. 
     
     __init__ : Inherit from nn.Module: Inherits from PyTorch's base class for all neural network modules.
     Parameters: Accepts parameters like the number of samples to draw during inference (num_samples), the shape of the weights tensor (weights_shape, from the fc1 layer), 
@@ -180,36 +179,36 @@ class BBB_Linear_spike_slab(nn.Module):
 ## Neural network model:
 class Model(nn.Module):
     '''
-    The Model class extends PyTorch's nn.Module and encapsulates a neural network model that utilizes 
+    The Model class extends PyTorch's nn.Module and encapsulates a neural network model that utilizes
     a Bayesian by Backpropagation Linear layer with spike-and-slab priors (BBB_Linear_spike_slab).
 
     __init__ : Inherits from nn.Module, PyTorch's base class for all neural network modules. Parameters:
 
-    dim_in: Input dimensionality. 
-    The input dimension of the model is set to the number of SNPs not on the chromosome currently being left out (LOCO analysis). 
+    dim_in: Input dimensionality.
+    The input dimension of the model is set to the number of SNPs not on the chromosome currently being left out (LOCO analysis).
     This is determined by counting the SNPs where chr_map != chr, ensuring that the model only considers SNPs from other chromosomes.
 
     dim_out: Output dimensionality.
-    The output dimension is determined by the count of elements in dim_out that match the current alpha_no. 
-    This effectively sets the number of outputs to match the number of traits or phenotypes 
+    The output dimension is determined by the count of elements in dim_out that match the current alpha_no.
+    This effectively sets the number of outputs to match the number of traits or phenotypes
     being analyzed under the current alpha configuration.
 
     num_samples: Number of samples to draw from the posterior during inference.
-    Specifies the number of samples to draw from the posterior distribution during inference. 
-    
+    Specifies the number of samples to draw from the posterior distribution during inference.
+
     alpha: Hyperparameter for controlling the sparsity in the weights.
 
     prior_sig: Standard deviation of the prior distribution of the weights.
 
     posterior_sig: Optional; standard deviation of the posterior distribution of the weights, initialized during training.
-    Specifies the standard deviation of the posterior distribution of the weights. Like prior_sig, it is adjusted for the current alpha_no and excludes SNPs from the current chromosome. 
-    
+    Specifies the standard deviation of the posterior distribution of the weights. Like prior_sig, it is adjusted for the current alpha_no and excludes SNPs from the current chromosome.
+
     mu: Optional; initial mean values of the posterior distribution of the weights.
-    Represents the mean values of the posterior distribution of the weights. If provided, mu is filtered based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the specified device. 
+    Represents the mean values of the posterior distribution of the weights. If provided, mu is filtered based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the specified device.
     This operation initializes the model's weights with values potentially learned from previous analyses or a different context.
 
     spike: Optional; initial values of the spike variable, controlling the sparsity of the weights.
-    Specifies the spike parameter values for the spike-and-slab prior. Like mu, if spike is provided, it is processed based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the device. 
+    Specifies the spike parameter values for the spike-and-slab prior. Like mu, if spike is provided, it is processed based on the current alpha_no and chromosome exclusion, then converted to a tensor, set to the appropriate data type, and transferred to the device.
     The spike parameter controls the sparsity in the model's weights, complementing the role of alpha.
 
     Initializes a linear layer (fc1) without bias, followed by a BBB_Linear_spike_slab layer (sc1) with specified parameters.
@@ -1181,9 +1180,8 @@ def hyperparam_search(args, alpha, h2, train_dataset, test_dataset, device="cuda
 
 def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     '''
-    The blr_spike_slab function encapsulates the entire process of performing Bayesian Linear Regression (BLR) with spike-and-slab priors, 
-    specifically tailored for genetic data analysis. It includes steps for hyperparameter tuning, model training on the entire 
-    dataset, and the computation of Bayesian estimates. 
+    The blr_spike_slab function encapsulates the entire process of performing Bayesian Linear Regression (BLR) with spike-and-slab priors. It includes steps for hyperparameter tuning, model training on the entire 
+    dataset, and the computation of posteriors. 
     '''
     overall_start_time = time.time()
     torch.set_num_threads(get_cpu_count())  ## speedify computation on CPU
@@ -1432,11 +1430,11 @@ def blr_spike_slab(args, h2, hdf5_filename, device="cuda"):
     )
 
     '''
-    If args.predBetasFlag is true, calculates the Best Linear Unbiased Prediction (BLUP) Betas for the entire dataset 
+    If args.predBetasFlag is true, calculates posterior Betas for the entire dataset 
     using the trained models. This involves extracting the mean (mu) and spike parameters from the models corresponding 
     to the best alpha values and computing the product to obtain the Betas.
 
-    Calculation of BLUP Betas: The BLUP Betas are computed as the product of mu and spike parameters.
+    Calculation of Betas: The posterior Betas are computed as the product of mu and spike parameters.
     '''
 
     if args.predBetasFlag:

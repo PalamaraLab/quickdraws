@@ -197,7 +197,7 @@ def preprocess_phenotypes(pheno, covar, bed, keepfile, binary, hdf5=None, phen_t
 def PreparePhenoRHE(Trait, covar_effect, bed, filename, unrel_homo_samples=None):
     """
     Create a new tsv file, with labels [FID, IID, original phenotype, covariate effects] that is aligned with the given fam file,
-    Create another tsv file as is required for RHEmc. Trait is assumed to be a dataframe, as usually.
+    Create another tsv file as is required for RHEmc. Trait is assumed to be a dataframe, as usual.
     """
     Trait = Trait.reset_index(drop=True)
     pheno_columns = Trait.columns[2:].tolist()
