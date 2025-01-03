@@ -10,7 +10,7 @@ python = "^3.10"
 h5py = "*"
 joblib = "*"
 numba = "*"
-numpy = "*"
+numpy = "2.0.2"
 pandas = "*"
 pysnptools = { version = ">=0.5.13", extras = ["bgen"] }
 scikit_learn = "*"
