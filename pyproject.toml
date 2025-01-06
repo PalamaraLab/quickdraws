@@ -28,7 +28,7 @@ torch = [
     { version = ">=2.5", markers = "sys_platform == 'linux'", source = "torch_linux_cu118" }
 ]
 
-[tool.poetry.dev-dependencies]
+[poetry.group.dev.dependencies]
 pip = ">=23"
 setuptools = ">=68"
 
