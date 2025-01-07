@@ -41,7 +41,6 @@ The code snippets below will probably work for most systems, and should install 
 #### Linux
 
 ```
-pip install torch --index-url https://download.pytorch.org/whl/cu118
 pip install quickdraws
 ```
 

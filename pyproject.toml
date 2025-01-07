@@ -16,18 +16,16 @@ pysnptools = { version = ">=0.5.13", extras = ["bgen"] }
 scikit_learn = "*"
 scipy = "*"
 statsmodels = "*"
+bgen_reader = "4.0.8"
 tqdm = "*"
 wandb = "*"
 tables = "^3.10.1"
 bitsandbytes = { version = "*", markers = "sys_platform == 'linux'" }
 pybgen = "*"
 rhe = "==1.0.0"
-torch = [
-    { version = ">=2.5", markers = "sys_platform == 'darwin'", source = "pypi" },
-    { version = ">=2.5", markers = "sys_platform == 'linux'", source = "torch_linux_cu118" }
-]
+torch = "*"
 
-[tool.poetry.dev-dependencies]
+[poetry.group.dev.dependencies]
 pip = ">=23"
 setuptools = ">=68"
 
