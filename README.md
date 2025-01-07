@@ -1,4 +1,4 @@
-<img src="./quickdraw.png" alt="Quickdraws Logo" width="100%"/>
+<img src="https://github.com/PalamaraLab/quickdraws/blob/384f5047aa3a278952a262c84bb1d4c3d14bc1f4/quickdraw.png" alt="Quickdraws Logo" width="100%"/>
 
 <hr style="border: 3px solid #000; margin-top: 20px;"/>
 
@@ -32,19 +32,15 @@ pip install --upgrade pip setuptools wheel
 
 It is necessary for anything bigger than toy examples to use either:
 
-1. on Linux, a cuda-enabled version of pytorch
-2. on macOS, the latest nightly build of pytorch, which can leverage the MPS backend
+1. on Linux, a cuda-enabled version of pytorch (now available by default from PyPI)
+2. on macOS, the latest pytorch, which can leverage the MPS backend
 
-Use the [pytorch configuration helper](https://pytorch.org/get-started/locally/) to find suitable installation instruction for your system.
-The code snippets below will probably work for most systems, and should install quickdraws in approximately 10 minutes for cuda or much quicker on macOS:
+Use the [pytorch configuration helper](https://pytorch.org/get-started/locally/) to find suitable installation instruction for your system, based on your preferred CUDA version.
+If you want a specific CUDA version, you may need to start with something like `pip install torch --index-url https://download.pytorch.org/whl/cu118`.
 
-#### Linux
+The code snippet below will probably work for most systems, and should install quickdraws in approximately 10 minutes for cuda or much quicker on macOS:
 
-```
-pip install quickdraws
-```
-
-#### macOS
+#### Linux or macOS
 
 ```
 pip install quickdraws
@@ -95,6 +91,12 @@ Loya et al., "A scalable variational inference approach for increased mixed-mode
 
 
 ## Release Notes
+
+### v0.1.2 (2025-01-07)
+
+- Minor updates to documentation
+- Remove reliance on specific CUDA torch for Linux
+- Resolve numpy dependency conflict
 
 ### v0.1.1 (2024-10-24)
 
