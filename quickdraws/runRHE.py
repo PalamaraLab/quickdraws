@@ -51,7 +51,7 @@ def calc_ldscore_chip(bed, num_samples=1000):
 
     geno = 2 - (
         snp_data[
-            random.sample(range(len(snp_data.iid)), num_samples), np.argsort(pos)
+            random.sample(range(len(snp_data.iid)), num_samples), :
         ]
         .read(dtype="float32")
         .val

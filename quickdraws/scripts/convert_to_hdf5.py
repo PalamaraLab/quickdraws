@@ -79,7 +79,7 @@ def get_geno_covar_effect(bed, sample_indices, covars, snp_mask, chunk_size=512,
     for i in range(0, snp_on_disk.shape[1], chunk_size):
         x = 2 - (
             snp_on_disk[:, i : min(i + chunk_size, snp_on_disk.shape[1])]
-            .read(dtype="float64", num_threads=num_threads)
+            .read(dtype="float64")
             .val
         )
         geno_covar_effect_numba, xtx_numba = get_xtx(x, covars, K)
@@ -98,7 +98,7 @@ def convert_to_hdf5(
     out="out",
     snps_to_keep_filename=None,
     master_hdf5=None,
-    chunk_size=512,
+    chunk_size=8192,
 ):
     num_threads = get_cpu_count()
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
@@ -192,16 +192,17 @@ def convert_to_hdf5(
                 snp_on_disk[
                     sample_indices[i : min(i + chunk_size, total_samples)], snp_mask
                 ]
-                .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
+                .read(dtype="int8", _require_float32_64=False)
                 .val
             )
-            x = np.array(x, dtype="float32")
-            x[x < 0] = np.nan
-            x = np.where(
-                np.isnan(x),
-                np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
-                x,
-            )
+            for col_idx in range(x.shape[1]):
+                col = x[:, col_idx]
+                mask = (col >= 0)
+                if np.any(mask):
+                    col[~mask] = int(np.round(np.median(col[mask])))
+                else:
+                    col[:] = 0
+            
             dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
             dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
             ## np.packbits() requires most time (~ 80%)
@@ -224,7 +225,7 @@ def make_master_hdf5(
     bed,
     out="out",
     snps_to_keep_filename=None,
-    chunk_size=512,
+    chunk_size=8192,
 ):
     num_threads = get_cpu_count()
     h1 = h5py.File(out + ".hdf5", 'w') ###caution
@@ -272,16 +273,18 @@ def make_master_hdf5(
             snp_on_disk[
                 i : min(i + chunk_size, total_samples), :
             ]
-            .read(dtype="int8", _require_float32_64=False, num_threads=num_threads)
+            .read(dtype="int8", _require_float32_64=False)
             .val
         )
-        x = np.array(x, dtype="float32")
-        x[x < 0] = np.nan
-        x = np.where(
-            np.isnan(x),
-            np.nanpercentile(x, 50, axis=0, interpolation="nearest"),
-            x,
-        )
+        
+        for col_idx in range(x.shape[1]):
+            col = x[:, col_idx]
+            mask = (col >= 0)
+            if np.any(mask):
+                col[~mask] = int(np.round(np.median(col[mask])))
+            else:
+                col[:] = 0
+
         dset1[i : i + x.shape[0]] = np.packbits(np.array(x > 0, dtype=np.int8), axis=1)
         dset2[i : i + x.shape[0]] = np.packbits(np.array(x > 1, dtype=np.int8), axis=1)
 
@@ -335,6 +338,7 @@ def main():
         default=False,
     )
     parser.add_argument("--hdf5", help="master hdf5 file which stores genotype matrix in binary format", type=str)
+    parser.add_argument("--chunksize", help="Chunk size of the HDF5 file, higher usually leads to faster conversion but might require more RAM, should be divisible by 128", type=int, default=8192)
     args = parser.parse_args()
 
     ######      Logging setup                    #######
@@ -353,7 +357,8 @@ def main():
     logging.info("")
     logging.info('Running script to create hdf5 file...')
 
-
+    if args.chunksize%128 != 0:
+        logging.warning("Chunksize not a multiple of batch size (128), might lead to performance drop in Bayesian linear regression")
     if args.bed is not None and args.phenoFile is not None:
         Traits, covar_effects, sample_indices = preprocess_phenotypes(
             args.phenoFile, args.covarFile, args.bed, args.keepFile, args.binary
@@ -361,10 +366,10 @@ def main():
         PreparePhenoRHE(Traits, covar_effects, args.bed, args.out, None)
         # np.arange(405088)
         convert_to_hdf5(
-            args.bed, args.covarFile, sample_indices, args.out, args.modelSnps, args.hdf5
+            args.bed, args.covarFile, sample_indices, args.out, args.modelSnps, args.hdf5, args.chunksize
         )
     elif args.bed is not None:
-        make_master_hdf5(args.bed, args.out, args.modelSnps)
+        make_master_hdf5(args.bed, args.out, args.modelSnps, args.chunksize)
 
 
 if __name__ == "__main__":
