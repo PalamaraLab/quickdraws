@@ -226,6 +226,7 @@ def main():
         const=True,
         default=False,
     )
+    parser.add_argument("--chunksize", help="Chunk size of the HDF5 file, higher usually leads to faster conversion but might require more RAM, should be divisible by 128", type=int, default=8192)
     ## wandb arguments
     wandb_group = parser.add_argument_group("WandB")
     wandb_mode = wandb_group.add_mutually_exclusive_group()
@@ -300,7 +301,8 @@ def main():
             sample_indices,
             args.out,
             args.modelSnps,
-            args.hdf5
+            args.hdf5,
+            args.chunksize
         )
         logging.info("#### Step 1a. Done in " + str(time.time() - st) + " secs ####")
         logging.info("")
