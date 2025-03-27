@@ -92,6 +92,10 @@ Loya et al., "A scalable variational inference approach for increased mixed-mode
 
 ## Release Notes
 
+### v0.1.4 (2025-03-27)
+
+- Bug fix, introduced --chunksize argument in quickdraws-step-1 aswell
+
 ### v0.1.3 (2025-01-24)
 
 - Better memory usage and speed for step 0, introduced --chunksize argument
